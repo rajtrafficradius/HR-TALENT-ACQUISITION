@@ -1,0 +1,36 @@
+# ── Secrets — NEVER commit ───────────────────────────────────────
+.env
+.env.local
+*.key
+API_KEYS*.txt
+
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# ── Runtime / logs ───────────────────────────────────────────────
+*.log
+server.log
+*.sqlite
+output/
+.DS_Store
+
+# ── IDE ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Node / dev verification artifacts (not part of the app) ──────
+node_modules/
+package.json
+package-lock.json
+_shot_*.png
+_verify.js
+_babel*.js
+_babel_src.jsx
+_smoke*.py

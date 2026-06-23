@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RADIUS · Talent Acquisition</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e6a23c'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='none' stroke='%23120c04' stroke-width='3'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#0a0a0b">
+<meta name="robots" content="noindex,nofollow">
+<meta name="description" content="Radius Talent Acquisition — source, score, and shortlist job-change-ready candidates.">
+<meta property="og:title" content="RADIUS · Talent Acquisition">
+<meta property="og:description" content="Source, score, and shortlist job-change-ready candidates.">
+<meta property="og:type" content="website">
+<meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0a0b; --bg2:#111114; --bg3:#17171b; --bg4:#1d1d22;
+  --line:rgba(255,255,255,.075); --line2:rgba(255,255,255,.14); --line3:rgba(255,255,255,.22);
+  --t1:#f3f2ee; --t2:#a6a6a0; --t3:#6c6c67; --t4:#4a4a46;
+  --amber:#e6a23c; --amber-dim:#9c6f29; --amber-soft:rgba(230,162,60,.12);
+  --red:#d65a4a; --green:#7fae6f; --steel:#cdd0d4;
+  --sans:'Archivo',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace;
+  --disp:'Oswald',var(--sans); --rad:7px; --rad2:11px;
+  --sh:0 2px 8px rgba(0,0,0,.4),0 10px 34px rgba(0,0,0,.36);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--t1); font-family:var(--sans); font-size:14px; line-height:1.45;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+  background-image:
+    linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px),
+    radial-gradient(1200px 700px at 80% -10%, rgba(230,162,60,.05), transparent 60%);
+  background-size:44px 44px,44px 44px,100% 100%;
+}
+::selection{background:var(--amber);color:#000}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#26262b;border-radius:8px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:#34343a}
+button{font-family:inherit;cursor:pointer}
+input,select,button{font-family:inherit;color:inherit}
+a{color:var(--amber);text-decoration:none}
+.mono{font-family:var(--mono)}
+.kicker{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--t3)}
+
+/* ── Login ─────────────────────────────────────────── */
+.login-wrap{height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.login-card{width:100%;max-width:404px;background:linear-gradient(180deg,var(--bg2),#0d0d10);
+  border:1px solid var(--line2);border-radius:var(--rad2);padding:40px 36px;box-shadow:var(--sh);
+  position:relative;overflow:hidden;animation:rise .6s cubic-bezier(.2,.7,.2,1) both}
+.login-card::before{content:"";position:absolute;inset:0;background:
+  repeating-linear-gradient(135deg,transparent 0 18px,rgba(255,255,255,.012) 18px 19px);pointer-events:none}
+.brand-mark{display:flex;align-items:center;gap:11px;margin-bottom:30px}
+.brand-dot{width:30px;height:30px;border-radius:6px;background:var(--amber);position:relative;flex:none;
+  box-shadow:0 0 0 1px rgba(0,0,0,.4),0 4px 14px rgba(230,162,60,.4)}
+.brand-dot::after{content:"";position:absolute;inset:7px;border:2px solid #000;border-radius:2px}
+.brand-name{font-family:var(--disp);font-weight:700;font-size:18px;letter-spacing:.04em;line-height:1}
+.brand-sub{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--t3);text-transform:uppercase;margin-top:3px}
+.login-card h1{font-family:var(--disp);font-weight:600;font-size:25px;letter-spacing:.01em;margin-bottom:6px}
+.login-card p.lede{color:var(--t2);font-size:13px;margin-bottom:26px}
+.field{margin-bottom:16px}
+.field label{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--t3);margin-bottom:7px}
+.inp{width:100%;background:#0c0c0e;border:1px solid var(--line2);border-radius:var(--rad);
+  padding:11px 13px;font-size:14px;outline:none;transition:.18s;color:var(--t1)}
+.inp:focus{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-soft)}
+.inp::placeholder{color:var(--t4)}
+.btn{border:1px solid var(--line2);background:var(--bg3);color:var(--t1);padding:10px 16px;
+  border-radius:var(--rad);font-weight:600;font-size:13px;letter-spacing:.01em;transition:.16s;
+  display:inline-flex;align-items:center;gap:8px;justify-content:center}
+.btn:hover{border-color:var(--line3);background:var(--bg4)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--amber);border-color:var(--amber);color:#1a1206;font-weight:700}
+.btn-primary:hover{background:#f0ad48;border-color:#f0ad48}
+.btn-block{width:100%}
+.btn-ghost{background:transparent}
+.btn-danger{color:var(--red);border-color:rgba(214,90,74,.4)}
+.btn-danger:hover{background:rgba(214,90,74,.1);border-color:var(--red)}
+.btn-sm{padding:6px 11px;font-size:12px;border-radius:6px}
+.err{color:var(--red);font-size:12.5px;margin-top:4px;min-height:16px;font-family:var(--mono)}
+
+/* ── App shell ─────────────────────────────────────── */
+.shell{display:flex;flex-direction:column;height:100vh}
+.topbar{display:flex;align-items:center;gap:22px;height:62px;flex:none;padding:0 22px;
+  border-bottom:1px solid var(--line2);background:rgba(10,10,11,.86);backdrop-filter:blur(14px);
+  position:relative;z-index:30}
+.topbar .brand-mark{margin:0}
+.nav{display:flex;gap:4px;background:#0d0d10;border:1px solid var(--line);border-radius:9px;padding:4px}
+.nav button{background:transparent;border:none;color:var(--t2);padding:8px 17px;border-radius:6px;
+  font-family:var(--disp);font-weight:600;font-size:13px;letter-spacing:.04em;text-transform:uppercase;transition:.16s}
+.nav button:hover{color:var(--t1)}
+.nav button.on{background:var(--bg4);color:var(--t1);box-shadow:inset 0 0 0 1px var(--line2)}
+.spacer{flex:1}
+.kpis{display:flex;gap:7px}
+.kpi{background:#0d0d10;border:1px solid var(--line);border-radius:8px;padding:6px 13px;min-width:78px;text-align:right}
+.kpi .v{font-family:var(--disp);font-weight:700;font-size:19px;line-height:1;color:var(--t1)}
+.kpi .v.am{color:var(--amber)}
+.kpi .l{font-family:var(--mono);font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t3);margin-top:3px}
+.iconbtn{width:36px;height:36px;border-radius:8px;border:1px solid var(--line2);background:var(--bg3);
+  display:flex;align-items:center;justify-content:center;color:var(--t2);transition:.16s}
+.iconbtn:hover{color:var(--t1);border-color:var(--line3)}
+
+.body{flex:1;display:flex;min-height:0}
+.filters{width:268px;flex:none;border-right:1px solid var(--line2);background:var(--bg2);
+  overflow-y:auto;padding:18px 16px}
+.filters h3{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--t3);margin:0 0 14px;display:flex;align-items:center;gap:8px}
+.fgroup{margin-bottom:17px}
+.fgroup>label{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--t3);margin-bottom:6px}
+select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M1 3l4 4 4-4' stroke='%236c6c67' fill='none' stroke-width='1.4'/></svg>");
+  background-repeat:no-repeat;background-position:right 12px center;padding-right:30px;cursor:pointer}
+.inp.sm{padding:8px 11px;font-size:12.5px}
+.range{width:100%;-webkit-appearance:none;height:4px;border-radius:3px;background:#26262b;outline:none}
+.range::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+  background:var(--amber);cursor:pointer;border:2px solid #1a1206;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.rangerow{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+.rangerow .rv{font-family:var(--mono);font-size:12px;color:var(--amber);font-weight:500}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;
+  padding:9px 11px;background:#0d0d10;border:1px solid var(--line);border-radius:7px;transition:.15s}
+.toggle:hover{border-color:var(--line2)}
+.toggle .tl{font-size:12.5px;color:var(--t2)}
+.sw{width:38px;height:21px;border-radius:11px;background:#26262b;position:relative;transition:.18s;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#75756f;transition:.18s}
+.sw.on{background:var(--amber)}.sw.on::after{left:19px;background:#1a1206}
+
+.main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.mhead{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);flex:none}
+.mhead .count{font-family:var(--disp);font-weight:600;font-size:16px;letter-spacing:.02em}
+.mhead .count b{color:var(--amber);font-weight:700}
+.mscroll{flex:1;overflow-y:auto;padding:16px 22px 60px}
+
+/* ── Card rows ─────────────────────────────────────── */
+.rows{display:flex;flex-direction:column;gap:8px}
+.row{display:grid;align-items:center;gap:14px;background:var(--bg2);border:1px solid var(--line);
+  border-radius:var(--rad);padding:13px 16px;cursor:pointer;transition:.14s;position:relative;overflow:hidden}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:transparent;transition:.16s}
+.row:hover{border-color:var(--line2);background:var(--bg3);transform:translateX(2px)}
+.row.open::before{background:var(--amber)}
+.row-people{grid-template-columns:minmax(0,1.7fr) 1fr 96px 96px 130px}
+.row-co{grid-template-columns:minmax(0,1.8fr) 1fr 130px 110px}
+.who .nm{font-weight:600;font-size:14.5px;letter-spacing:.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who .ttl{color:var(--t2);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.cell-sub{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--t4);margin-bottom:3px}
+.cell-co{min-width:0}
+.cell-co .cn{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.cell-co .cd{font-family:var(--mono);font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* tags & badges */
+.tag{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;
+  letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:5px;
+  border:1px solid var(--line2);color:var(--t2);background:#0d0d10;white-space:nowrap}
+.tag.dept-seo{color:#cdd0d4;border-color:var(--line3)}
+.tag.dept-sales{color:#cdd0d4}
+.tag.amber{color:var(--amber);border-color:var(--amber-dim);background:var(--amber-soft)}
+.tag.dot::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+.badge-open{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--amber);font-weight:500}
+.badge-open .pulse{width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 0 rgba(230,162,60,.6);animation:pulse 2s infinite}
+.src{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--t3)}
+.src.history{color:var(--steel);border-color:var(--line3)}
+.src.linkedin{color:var(--amber);border-color:var(--amber-dim);background:var(--amber-soft)}
+.avail{display:flex;gap:6px;color:var(--t4)}
+.avail .on{color:var(--steel)}
+
+/* score gauge */
+.gauge{display:flex;flex-direction:column;gap:4px}
+.gauge .gt{display:flex;justify-content:space-between;align-items:baseline}
+.gauge .gl{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3)}
+.gauge .gv{font-family:var(--disp);font-weight:600;font-size:13px;line-height:1}
+.bar{height:4px;border-radius:3px;background:#222226;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px;transition:width .5s cubic-bezier(.2,.7,.2,1)}
+.scorebig{display:flex;align-items:center;gap:10px}
+.scorebig .num{font-family:var(--disp);font-weight:700;font-size:30px;line-height:1}
+.ring{--p:0;width:46px;height:46px;border-radius:50%;flex:none;
+  background:conic-gradient(var(--amber) calc(var(--p)*1%), #222226 0);
+  display:flex;align-items:center;justify-content:center;position:relative}
+.ring::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--bg2)}
+.ring span{position:relative;font-family:var(--disp);font-weight:700;font-size:14px}
+
+/* pagination */
+.pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:20px 0 8px;color:var(--t2)}
+.pager .pi{font-family:var(--mono);font-size:12px;letter-spacing:.05em}
+
+/* empty / loading */
+.empty{text-align:center;padding:70px 20px;color:var(--t3)}
+.empty .big{font-family:var(--disp);font-size:20px;color:var(--t2);margin-bottom:8px;letter-spacing:.02em}
+.spin{width:16px;height:16px;border:2px solid var(--line2);border-top-color:var(--amber);border-radius:50%;
+  animation:spin .7s linear infinite;display:inline-block;vertical-align:-3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(230,162,60,.5)}70%{box-shadow:0 0 0 7px rgba(230,162,60,0)}100%{box-shadow:0 0 0 0 rgba(230,162,60,0)}}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes slidein{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+
+/* ── Drawer ────────────────────────────────────────── */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);z-index:40;animation:fade .2s both}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,94vw);background:var(--bg2);
+  border-left:1px solid var(--line2);z-index:41;display:flex;flex-direction:column;
+  box-shadow:-20px 0 60px rgba(0,0,0,.5);animation:slidein .28s cubic-bezier(.2,.7,.2,1) both}
+.dhead{flex:none;padding:22px 24px 18px;border-bottom:1px solid var(--line)}
+.dhead .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.dhead h2{font-family:var(--disp);font-weight:600;font-size:23px;letter-spacing:.01em;line-height:1.1}
+.dhead .role{color:var(--t2);font-size:14px;margin-top:5px}
+.dmeta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.dbody{flex:1;overflow-y:auto;padding:20px 24px 40px}
+.sect{margin-bottom:24px}
+.sect-h{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--t3);
+  margin-bottom:12px;display:flex;align-items:center;gap:9px}
+.sect-h::after{content:"";flex:1;height:1px;background:var(--line)}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:13px 20px}
+.kv{display:flex;flex-direction:column;gap:3px}
+.kv .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3)}
+.kv .v{font-size:13.5px;color:var(--t1)}
+.contact-box{background:#0d0d10;border:1px solid var(--line2);border-radius:var(--rad);padding:15px}
+.contact-row{display:flex;align-items:center;gap:10px;padding:8px 0}
+.contact-row+.contact-row{border-top:1px solid var(--line)}
+.contact-row .ci{width:30px;height:30px;border-radius:7px;background:var(--bg4);display:flex;align-items:center;justify-content:center;color:var(--t3);flex:none}
+.contact-row .cv{font-family:var(--mono);font-size:13px;color:var(--t1);word-break:break-all}
+.contact-row .cv.dim{color:var(--t3)}
+.enrich-ctl{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:13px}
+.chk{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--t2);cursor:pointer;user-select:none}
+.chk input{appearance:none;width:16px;height:16px;border:1px solid var(--line3);border-radius:4px;background:#0c0c0e;position:relative;cursor:pointer}
+.chk input:checked{background:var(--amber);border-color:var(--amber)}
+.chk input:checked::after{content:"✓";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#1a1206;font-size:11px;font-weight:800}
+.timeline{position:relative;padding-left:20px}
+.timeline::before{content:"";position:absolute;left:5px;top:4px;bottom:4px;width:1px;background:var(--line2)}
+.tl-item{position:relative;padding:0 0 16px}
+.tl-item::before{content:"";position:absolute;left:-18px;top:4px;width:9px;height:9px;border-radius:50%;background:var(--bg4);border:1px solid var(--line3)}
+.tl-item.cur::before{background:var(--amber);border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-soft)}
+.tl-item .tt{font-size:13.5px;font-weight:600}
+.tl-item .to{color:var(--t2);font-size:12.5px}
+.tl-item .td{font-family:var(--mono);font-size:11px;color:var(--t3);margin-top:2px}
+.evid{display:flex;gap:10px;flex-wrap:wrap}
+.evid .ev{flex:1;min-width:120px;background:#0d0d10;border:1px solid var(--line);border-radius:var(--rad);padding:12px 14px}
+.evid .ev .en{font-family:var(--disp);font-weight:700;font-size:24px;color:var(--amber);line-height:1}
+.evid .ev .ek{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-top:5px}
+.blurb{background:var(--amber-soft);border:1px solid var(--amber-dim);border-radius:var(--rad);padding:12px 14px;color:#f0d9b5;font-size:13.5px;font-style:italic}
+.logline{font-family:var(--mono);font-size:11px;color:var(--t3);padding:5px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}
+
+/* ── Discovery ─────────────────────────────────────── */
+.disc{max-width:760px;margin:0 auto;padding:26px 22px 60px}
+.disc h2{font-family:var(--disp);font-weight:600;font-size:24px;letter-spacing:.01em;margin-bottom:6px}
+.disc p.lede{color:var(--t2);margin-bottom:24px;font-size:13.5px}
+.panel{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--rad2);padding:22px;margin-bottom:18px}
+.deptgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.deptchk{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#0d0d10;border:1px solid var(--line);
+  border-radius:var(--rad);cursor:pointer;transition:.15s}
+.deptchk:hover{border-color:var(--line2)}
+.deptchk.on{border-color:var(--amber-dim);background:var(--amber-soft)}
+.deptchk .dn{font-weight:600;font-size:13.5px}.deptchk .dd{font-size:11.5px;color:var(--t3)}
+.console{background:#070708;border:1px solid var(--line2);border-radius:var(--rad);padding:14px;
+  height:300px;overflow-y:auto;font-family:var(--mono);font-size:11.5px;line-height:1.7;color:var(--t2)}
+.console .l{white-space:pre-wrap;word-break:break-word}
+.console .l.hi{color:var(--amber)}
+.pbar{height:6px;border-radius:4px;background:#1a1a1e;overflow:hidden;margin:14px 0}
+.pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber-dim),var(--amber));transition:width .4s}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--bg4);
+  border:1px solid var(--line2);border-radius:9px;padding:12px 18px;z-index:60;box-shadow:var(--sh);
+  font-size:13px;display:flex;align-items:center;gap:10px;animation:rise .3s both;max-width:90vw}
+.toast.ok{border-color:var(--amber-dim)}.toast.bad{border-color:rgba(214,90,74,.5)}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;background:#0d0d10;border:1px solid var(--line2);
+  border-radius:6px;padding:6px 9px;font-family:var(--mono);font-size:12px}
+.chip button{background:none;border:none;color:var(--t3);font-size:14px;line-height:1;padding:0}
+.chip button:hover{color:var(--red)}
+@media(max-width:880px){.kpis{display:none}.filters{width:230px}.row-people{grid-template-columns:minmax(0,1.6fr) 100px 120px}.row-people .col-hide{display:none}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
+
+/* ── helpers ──────────────────────────────────────── */
+async function api(path,opts={}){
+  const r=await fetch(path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});
+  let j={}; try{j=await r.json()}catch(e){}
+  j.__status=r.status; return j;
+}
+const cls=(...a)=>a.filter(Boolean).join(' ');
+const DEPT_LABEL={sales:'Sales',marketing:'Marketing',seo:'SEO',digital_marketing:'Digital Mktg',other:'Other'};
+const titleCase=s=>(s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+function scoreColor(v){v=+v||0; if(v>=75)return'var(--amber)'; if(v>=55)return'#cdd0d4'; if(v>=40)return'#86867f'; return'#54544f';}
+function fmtNum(n){ if(n==null)return'—'; if(n>=1e9)return(n/1e9).toFixed(1)+'B'; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'k'; return''+n; }
+function fmtDate(s){ if(!s)return'—'; try{return new Date(s).toLocaleDateString(undefined,{day:'2-digit',month:'short',year:'numeric'})}catch(e){return s} }
+
+/* ── tiny components ─────────────────────────────── */
+function Gauge({label,value}){
+  return <div className="gauge"><div className="gt"><span className="gl">{label}</span>
+    <span className="gv" style={{color:scoreColor(value)}}>{value??'—'}</span></div>
+    <div className="bar"><i style={{width:(value||0)+'%',background:scoreColor(value)}}/></div></div>;
+}
+function Ring({value}){return <div className="ring" style={{'--p':value||0}}><span style={{color:scoreColor(value)}}>{value??'—'}</span></div>;}
+function IntentSrc({source}){
+  const map={heuristic:['Heuristic',''],history:['History · verified','history'],linkedin:['LinkedIn ✓','linkedin']};
+  const [t,k]=map[source]||['Heuristic',''];
+  return <span className={cls('src',k)} title="How job-change intent was determined">{t}</span>;
+}
+function DeptTag({d}){return <span className={cls('tag','dot','dept-'+d)}>{DEPT_LABEL[d]||d}</span>;}
+function OpenBadge(){return <span className="badge-open"><span className="pulse"/>Open to shift</span>;}
+function Avail({email,phone}){
+  return <span className="avail mono" title="Contact data available via Apollo enrichment">
+    <span className={email?'on':''}>✉</span><span className={phone?'on':''}>☏</span></span>;
+}
+
+/* ── Login ───────────────────────────────────────── */
+function Login({onIn}){
+  const [pw,setPw]=useState(''),[err,setErr]=useState(''),[busy,setBusy]=useState(false);
+  const submit=async e=>{e.preventDefault();setBusy(true);setErr('');
+    const r=await api('/login',{method:'POST',body:JSON.stringify({password:pw})});
+    setBusy(false); if(r.ok)onIn(); else setErr('Incorrect password.');};
+  return <div className="login-wrap"><form className="login-card" onSubmit={submit}>
+    <div className="brand-mark"><div className="brand-dot"/><div>
+      <div className="brand-name">RADIUS</div><div className="brand-sub">Talent Acquisition</div></div></div>
+    <h1>Candidate Intelligence</h1>
+    <p className="lede">Sign in to source, score, and shortlist job-change-ready talent.</p>
+    <div className="field"><label>Access password</label>
+      <input className="inp" type="password" value={pw} autoFocus onChange={e=>setPw(e.target.value)} placeholder="••••••••••"/>
+      <div className="err">{err}</div></div>
+    <button className="btn btn-primary btn-block" disabled={busy||!pw}>{busy?<span className="spin"/>:'Enter'}</button>
+  </form></div>;
+}
+
+/* ── score gauges block ──────────────────────────── */
+function ScoreBlock({c}){
+  const g=[['Role fit',c.role_fit_score],['Job-change intent',c.job_change_intent_score],
+    ['Technical',c.technical_score],['Company quality',c.company_quality_score],['Freshness',c.freshness_score]];
+  return <div className="sgrid" style={{gridTemplateColumns:'1fr 1fr'}}>{g.map(([l,v])=><Gauge key={l} label={l} value={v}/>)}</div>;
+}
+
+/* ── Person drawer ───────────────────────────────── */
+function PersonDrawer({id,onClose,onChanged,toast}){
+  const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(false);
+  const load=useCallback(async()=>{const r=await api('/api/people/'+id); if(r.candidate)setD(r);},[id]);
+  useEffect(()=>{setD(null);load();},[id,load]);
+  const enrich=async()=>{setBusy(true);
+    const r=await api('/api/enrich/'+id,{method:'POST',body:JSON.stringify({reveal_email:rE,reveal_phone:rP})});
+    setBusy(false);
+    if(r.__status===409&&r.error==='no_credits'){toast('Apollo credits exhausted — reveal unavailable','bad');}
+    else if(r.ok){toast(r.cached?'Already enriched':'Enriched · contact revealed','ok');await load();onChanged&&onChanged();}
+    else{toast('Enrichment failed','bad');await load();}};
+  if(!d)return <div className="drawer"><div className="dhead"><div className="top"><div><h2>Loading…</h2></div>
+    <button className="iconbtn" onClick={onClose}>✕</button></div></div>
+    <div className="dbody"><div className="empty"><span className="spin"/></div></div></div>;
+  const c=d.candidate, co=d.company, sig=(c.scores_json||{}).intent_signals||{}, ai=c.ai_meta_json||{};
+  const eh=c.employment_history_json||[]; const enriched=c.enrichment_status==='enriched';
+  return <div className="drawer">
+    <div className="dhead"><div className="top"><div>
+      <h2>{c.full_name}</h2><div className="role">{c.title||'—'}{c.company_name?(' · '+c.company_name):''}</div></div>
+      <button className="iconbtn" onClick={onClose}>✕</button></div>
+      <div className="dmeta"><DeptTag d={c.department}/>{c.seniority&&<span className="tag">{titleCase(c.seniority)}</span>}
+        {c.location_country&&<span className="tag">{c.location_country}</span>}
+        {c.open_to_shift?<OpenBadge/>:null}</div></div>
+    <div className="dbody">
+      <div className="sect"><div className="sect-h">Candidate score</div>
+        <div className="scorebig" style={{marginBottom:16}}><Ring value={c.overall_candidate_score}/>
+          <div><div className="kicker">Overall</div>
+            <div style={{fontFamily:'var(--disp)',fontWeight:600,fontSize:15,marginTop:2}}>
+              {c.overall_candidate_score>=75?'Strong prospect':c.overall_candidate_score>=55?'Worth a look':'Low priority'}</div></div></div>
+        <ScoreBlock c={c}/></div>
+
+      <div className="sect"><div className="sect-h">Job-change intent &nbsp;<IntentSrc source={c.intent_source}/></div>
+        {enriched&&sig.regime==='history'?
+          <div className="evid" style={{marginBottom:12}}>
+            <div className="ev"><div className="en">{sig.tenure_months??'—'}</div><div className="ek">Months in role</div></div>
+            <div className="ev"><div className="en">{sig.jobs_last_5y??'—'}</div><div className="ek">Jobs · last 5y</div></div>
+            <div className="ev"><div className="en">{sig.avg_tenure_months??'—'}</div><div className="ek">Avg tenure (mo)</div></div>
+          </div>:
+          <p style={{color:'var(--t3)',fontSize:13,marginBottom:6}}>
+            {enriched?'Evidence-based from employment history.':'Inferred from title, seniority & company signals. Enrich for evidence-based intent from real employment history.'}</p>}
+        {ai.why&&<div className="blurb">{ai.why}</div>}</div>
+
+      <div className="sect"><div className="sect-h">Contact</div>
+        <div className="contact-box">
+          <div className="contact-row"><div className="ci">✉</div>
+            <div className="cv" style={{flex:1}}>{c.email?c.email:<span className="cv dim">{c.has_email?'Available — not revealed':'Not available'}</span>}</div></div>
+          <div className="contact-row"><div className="ci">☏</div>
+            <div className="cv" style={{flex:1}}>{c.phone?c.phone:<span className="cv dim">{c.has_phone?'Available — not revealed':'Not available'}</span>}</div></div>
+          {c.linkedin_url&&<div className="contact-row"><div className="ci">in</div>
+            <a className="cv" href={c.linkedin_url} target="_blank" rel="noopener" style={{flex:1}}>{c.linkedin_url.replace(/^https?:\/\/(www\.)?/,'')}</a></div>}
+          {!enriched&&<div className="enrich-ctl">
+            <label className="chk"><input type="checkbox" checked={rE} onChange={e=>setRE(e.target.checked)}/>Email</label>
+            <label className="chk"><input type="checkbox" checked={rP} onChange={e=>setRP(e.target.checked)}/>Phone <span style={{color:'var(--t4)'}}>(more credits)</span></label>
+            <button className="btn btn-primary btn-sm" disabled={busy||(!rE&&!rP)} onClick={enrich}>
+              {busy?<span className="spin"/>:'⚡ Enrich via Apollo'}</button></div>}
+          {enriched&&<div style={{marginTop:10,fontFamily:'var(--mono)',fontSize:10.5,color:'var(--t3)',letterSpacing:'.05em'}}>
+            ✓ ENRICHED {c.enriched_at?('· '+fmtDate(c.enriched_at)):''}</div>}
+        </div></div>
+
+      {eh.length>0&&<div className="sect"><div className="sect-h">Employment history</div>
+        <div className="timeline">{eh.map((j,i)=><div key={i} className={cls('tl-item',j.current&&'cur')}>
+          <div className="tt">{j.title||'—'}</div><div className="to">{j.organization_name||''}</div>
+          <div className="td">{(j.start_date||'?')+' — '+(j.current?'Present':(j.end_date||'?'))}</div></div>)}</div></div>}
+
+      {co&&<div className="sect"><div className="sect-h">Company</div>
+        <div className="sgrid">
+          <div className="kv"><span className="k">Name</span><span className="v">{co.name}</span></div>
+          <div className="kv"><span className="k">Domain</span><span className="v mono">{co.root_domain||'—'}</span></div>
+          <div className="kv"><span className="k">Industry</span><span className="v">{co.industry||'—'}</span></div>
+          <div className="kv"><span className="k">Employees</span><span className="v">{fmtNum(co.estimated_employees)}</span></div>
+          <div className="kv"><span className="k">Quality</span><span className="v" style={{color:scoreColor(co.company_quality_score)}}>{co.company_quality_score}</span></div>
+          <div className="kv"><span className="k">Founded</span><span className="v">{co.founded_year||'—'}</span></div>
+        </div></div>}
+
+      <div className="sect"><div className="sect-h">Provenance</div>
+        <div className="sgrid">
+          <div className="kv"><span className="k">Source</span><span className="v">{c.source}</span></div>
+          <div className="kv"><span className="k">Confidence</span><span className="v">{c.confidence}%</span></div>
+          <div className="kv"><span className="k">Discovered</span><span className="v">{fmtDate(c.discovered_at)}</span></div>
+          <div className="kv"><span className="k">Last verified</span><span className="v">{fmtDate(c.last_verified_at)}</span></div>
+        </div></div>
+    </div></div>;
+}
+
+/* ── Company drawer ──────────────────────────────── */
+function CompanyDrawer({id,onClose,onPerson}){
+  const [d,setD]=useState(null);
+  useEffect(()=>{setD(null);(async()=>{const r=await api('/api/companies/'+id);if(r.company)setD(r);})();},[id]);
+  if(!d)return <div className="drawer"><div className="dhead"><div className="top"><div><h2>Loading…</h2></div>
+    <button className="iconbtn" onClick={onClose}>✕</button></div></div>
+    <div className="dbody"><div className="empty"><span className="spin"/></div></div></div>;
+  const co=d.company,ppl=d.people||[];
+  return <div className="drawer">
+    <div className="dhead"><div className="top"><div>
+      <h2>{co.name}</h2><div className="role mono">{co.root_domain||'domain pending enrichment'}</div></div>
+      <button className="iconbtn" onClick={onClose}>✕</button></div>
+      <div className="dmeta">{co.industry&&<span className="tag">{co.industry}</span>}
+        {co.enriched?<span className="tag amber dot">Enriched</span>:<span className="tag">Name-matched</span>}</div></div>
+    <div className="dbody">
+      <div className="sect"><div className="sect-h">Firmographics</div>
+        <div className="scorebig" style={{marginBottom:16}}><Ring value={co.company_quality_score}/>
+          <div><div className="kicker">Company quality</div>
+          <div style={{fontFamily:'var(--disp)',fontWeight:600,fontSize:15,marginTop:2}}>{fmtNum(co.estimated_employees)} employees</div></div></div>
+        <div className="sgrid">
+          <div className="kv"><span className="k">Revenue</span><span className="v">{co.annual_revenue?('$'+fmtNum(co.annual_revenue)):'—'}</span></div>
+          <div className="kv"><span className="k">Founded</span><span className="v">{co.founded_year||'—'}</span></div>
+          <div className="kv"><span className="k">HQ</span><span className="v">{[co.hq_city,co.hq_country].filter(Boolean).join(', ')||'—'}</span></div>
+          <div className="kv"><span className="k">Website</span><span className="v">{co.website_url?<a href={co.website_url} target="_blank" rel="noopener">visit</a>:'—'}</span></div>
+        </div></div>
+      <div className="sect"><div className="sect-h">People &nbsp;<span style={{color:'var(--t4)'}}>{ppl.length}</span></div>
+        <div className="rows">{ppl.map(p=><div key={p.id} className="row row-co" style={{gridTemplateColumns:'minmax(0,1.6fr) 80px 90px'}} onClick={()=>onPerson(p.id)}>
+          <div className="who"><div className="nm">{p.full_name}</div><div className="ttl">{p.title||'—'}</div></div>
+          <div>{p.open_to_shift?<OpenBadge/>:<span className="src">{titleCase(p.seniority||'—')}</span>}</div>
+          <Gauge label="Overall" value={p.overall_candidate_score}/></div>)}
+          {ppl.length===0&&<div className="empty"><div className="big">No people yet</div></div>}</div></div>
+    </div></div>;
+}
+
+/* ── People view ─────────────────────────────────── */
+const FRESH=[['','Any time'],['7','Last 7 days'],['30','Last 30 days'],['90','Last 90 days']];
+const SORTS=[['overall','Overall score'],['intent','Job-change intent'],['company_quality','Company quality'],['technical','Technical'],['role_fit','Role fit'],['freshness','Freshness'],['recent','Most recent']];
+function PeopleView({filters,setFilters,onPerson,refreshKey}){
+  const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
+  const f=filters;
+  const load=useCallback(async()=>{setLoading(true);
+    const q=new URLSearchParams({page,page_size:25});
+    Object.entries(f).forEach(([k,v])=>{if(v!==''&&v!=null&&v!==0)q.set(k,v);});
+    const r=await api('/api/people?'+q.toString()); setData(r.rows?r:{rows:[],total:0,total_pages:1}); setLoading(false);},[f,page,refreshKey]);
+  useEffect(()=>{load();},[load]);
+  useEffect(()=>{setPage(1);},[JSON.stringify(f)]);
+  return <>
+    <div className="mhead"><div className="count"><b>{data.total}</b> candidates</div><div className="spacer"/>
+      <span className="kicker">Sort</span>
+      <select className="inp sm" style={{width:170}} value={f.sort||'overall'} onChange={e=>setFilters({...f,sort:e.target.value})}>
+        {SORTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+    <div className="mscroll">
+      {loading?<div className="empty"><span className="spin"/></div>:
+       data.rows.length===0?<div className="empty"><div className="big">No candidates match</div>
+         <div>Adjust filters, or run a discovery sweep.</div></div>:
+      <div className="rows">{data.rows.map(c=><div key={c.id} className="row row-people" onClick={()=>onPerson(c.id)}>
+        <div className="who"><div className="nm">{c.full_name}</div><div className="ttl">{c.title||'—'}</div></div>
+        <div className="cell-co col-hide"><div className="cell-sub">Company</div><div className="cn">{c.company_name||'—'}</div>
+          <div className="cd">{c.company_domain||''}</div></div>
+        <div className="col-hide" style={{display:'flex',flexDirection:'column',gap:6}}>
+          <DeptTag d={c.department}/>{c.open_to_shift?<OpenBadge/>:<span className="src">{titleCase(c.seniority||'—')}</span>}</div>
+        <Gauge label="Intent" value={c.job_change_intent_score}/>
+        <div style={{display:'flex',flexDirection:'column',gap:7,alignItems:'flex-end'}}>
+          <div className="scorebig"><span className="num" style={{fontSize:21,color:scoreColor(c.overall_candidate_score)}}>{c.overall_candidate_score}</span></div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}><Avail email={c.has_email||c.email} phone={c.has_phone||c.phone}/>
+            {c.enrichment_status==='enriched'?<span className="src history">✓</span>:null}</div></div>
+      </div>)}</div>}
+      {data.total_pages>1&&<Pager page={page} pages={data.total_pages} set={setPage}/>}
+    </div></>;
+}
+
+/* ── Companies view ──────────────────────────────── */
+const CSORTS=[['candidates','Most candidates'],['quality','Quality'],['employees','Employees'],['name','Name A-Z'],['recent','Recent']];
+function CompaniesView({onCompany}){
+  const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
+  const [f,setF]=useState({sort:'candidates',q:'',industry:'',min_quality:0});
+  const [inds,setInds]=useState([]);
+  useEffect(()=>{(async()=>{const r=await api('/api/filters');setInds(r.industries||[]);})();},[]);
+  const load=useCallback(async()=>{setLoading(true);
+    const q=new URLSearchParams({page,page_size:25});
+    Object.entries(f).forEach(([k,v])=>{if(v!==''&&v!=null&&v!==0)q.set(k,v);});
+    const r=await api('/api/companies?'+q.toString());setData(r.rows?r:{rows:[],total:0,total_pages:1});setLoading(false);},[f,page]);
+  useEffect(()=>{load();},[load]); useEffect(()=>{setPage(1);},[JSON.stringify(f)]);
+  return <div className="body"><div className="filters">
+    <h3>◳ Company filters</h3>
+    <div className="fgroup"><label>Search</label><input className="inp sm" placeholder="Name or domain" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/></div>
+    <div className="fgroup"><label>Industry</label><select className="inp sm" value={f.industry} onChange={e=>setF({...f,industry:e.target.value})}>
+      <option value="">All industries</option>{inds.map(i=><option key={i} value={i}>{i}</option>)}</select></div>
+    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min company quality</label><span className="rv">{f.min_quality||0}</span></div>
+      <input className="range" type="range" min="0" max="100" value={f.min_quality} onChange={e=>setF({...f,min_quality:+e.target.value})}/></div>
+    <div className="fgroup"><label>Sort by</label><select className="inp sm" value={f.sort} onChange={e=>setF({...f,sort:e.target.value})}>
+      {CSORTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+    <button className="btn btn-ghost btn-block btn-sm" onClick={()=>setF({sort:'candidates',q:'',industry:'',min_quality:0})}>Reset</button>
+  </div><div className="main">
+    <div className="mhead"><div className="count"><b>{data.total}</b> companies</div></div>
+    <div className="mscroll">{loading?<div className="empty"><span className="spin"/></div>:
+      data.rows.length===0?<div className="empty"><div className="big">No companies yet</div><div>Run a discovery sweep to populate.</div></div>:
+      <div className="rows">{data.rows.map(co=><div key={co.id} className="row row-co" onClick={()=>onCompany(co.id)}>
+        <div className="cell-co"><div className="cn" style={{fontSize:14.5}}>{co.name}</div><div className="cd">{co.root_domain||'— domain pending —'}</div></div>
+        <div className="col-hide"><div className="cell-sub">Industry</div><div style={{fontSize:12.5,color:'var(--t2)'}}>{co.industry||'—'}</div></div>
+        <div style={{display:'flex',gap:14,alignItems:'center'}}>
+          <div><div className="cell-sub">People</div><div style={{fontFamily:'var(--disp)',fontWeight:700,fontSize:18}}>{co.candidate_count}</div></div>
+          <div><div className="cell-sub">Open</div><div style={{fontFamily:'var(--disp)',fontWeight:700,fontSize:18,color:co.open_count>0?'var(--amber)':'var(--t3)'}}>{co.open_count}</div></div></div>
+        <Gauge label="Quality" value={co.company_quality_score}/>
+      </div>)}</div>}
+      {data.total_pages>1&&<Pager page={page} pages={data.total_pages} set={setPage}/>}
+    </div></div></div>;
+}
+
+function Pager({page,pages,set}){
+  return <div className="pager">
+    <button className="btn btn-sm btn-ghost" disabled={page<=1} onClick={()=>set(page-1)}>← Prev</button>
+    <span className="pi">{page} / {pages}</span>
+    <button className="btn btn-sm btn-ghost" disabled={page>=pages} onClick={()=>set(page+1)}>Next →</button></div>;
+}
+
+/* ── People filter rail ──────────────────────────── */
+function PeopleFilters({f,setF,meta}){
+  return <div className="filters">
+    <h3>⛛ Candidate filters</h3>
+    <div className="fgroup"><label>Search</label><input className="inp sm" placeholder="Name, title, company" value={f.q||''} onChange={e=>setF({...f,q:e.target.value})}/></div>
+    <div className="fgroup"><label>Department</label><select className="inp sm" value={f.department||''} onChange={e=>setF({...f,department:e.target.value})}>
+      <option value="">All departments</option>{(meta.all_departments||[]).map(d=><option key={d} value={d}>{DEPT_LABEL[d]||d}</option>)}</select></div>
+    <div className="fgroup"><label>Seniority</label><select className="inp sm" value={f.seniority||''} onChange={e=>setF({...f,seniority:e.target.value})}>
+      <option value="">Any seniority</option>{(meta.seniorities||[]).map(s=><option key={s} value={s}>{titleCase(s)}</option>)}</select></div>
+    <div className="fgroup"><label>Company</label><select className="inp sm" value={f.company_id||''} onChange={e=>setF({...f,company_id:e.target.value})}>
+      <option value="">All companies</option>{(meta.companies||[]).map(c=><option key={c.id} value={c.id}>{c.name} ({c.n})</option>)}</select></div>
+    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min job-change intent</label><span className="rv">{f.min_intent||0}</span></div>
+      <input className="range" type="range" min="0" max="100" value={f.min_intent||0} onChange={e=>setF({...f,min_intent:+e.target.value})}/></div>
+    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min company score</label><span className="rv">{f.min_company_score||0}</span></div>
+      <input className="range" type="range" min="0" max="100" value={f.min_company_score||0} onChange={e=>setF({...f,min_company_score:+e.target.value})}/></div>
+    <div className="fgroup"><label>Enrichment</label><select className="inp sm" value={f.enrichment_status||''} onChange={e=>setF({...f,enrichment_status:e.target.value})}>
+      <option value="">Any status</option><option value="not_enriched">Not enriched</option><option value="enriched">Enriched</option></select></div>
+    <div className="fgroup"><label>Freshness</label><select className="inp sm" value={f.freshness||''} onChange={e=>setF({...f,freshness:e.target.value})}>
+      {FRESH.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+    <div className="fgroup"><div className="toggle" onClick={()=>setF({...f,open_to_shift:f.open_to_shift?'':'1'})}>
+      <span className="tl">Open to shift only</span><span className={cls('sw',f.open_to_shift&&'on')}/></div></div>
+    <button className="btn btn-ghost btn-block btn-sm" onClick={()=>setF({sort:f.sort})}>Reset filters</button>
+  </div>;
+}
+
+/* ── Discovery view ──────────────────────────────── */
+const DEPTS=[['seo','SEO','Search optimization talent'],['digital_marketing','Digital Marketing','PPC · paid · performance'],
+  ['marketing','Marketing','Brand · growth · demand gen'],['sales','Sales','BD · AE · revenue']];
+function DiscoveryView({onDone,toast}){
+  const [depts,setDepts]=useState(['seo','digital_marketing','marketing','sales']);
+  const [locs,setLocs]=useState(['India','Australia']),[locIn,setLocIn]=useState('');
+  const [maxc,setMaxc]=useState(800),[seed,setSeed]=useState(false);
+  const [job,setJob]=useState(null),[logs,setLogs]=useState([]),[prog,setProg]=useState(0),[state,setState]=useState(''),[stat,setStat]=useState('');
+  const cref=useRef(null);
+  const poll=useRef(null);
+  useEffect(()=>{if(cref.current)cref.current.scrollTop=cref.current.scrollHeight;},[logs]);
+  const toggleD=d=>setDepts(p=>p.includes(d)?p.filter(x=>x!==d):[...p,d]);
+  const addLoc=e=>{if(e.key==='Enter'&&locIn.trim()){setLocs(p=>[...new Set([...p,locIn.trim()])]);setLocIn('');e.preventDefault();}};
+  const start=async()=>{
+    if(!depts.length)return toast('Pick at least one department','bad');
+    const r=await api('/api/discover',{method:'POST',body:JSON.stringify({departments:depts,person_locations:locs,max_candidates:maxc,use_seed_domains:seed})});
+    if(r.__status===409)return toast('A discovery run is already active','bad');
+    if(!r.job_id)return toast('Could not start run','bad');
+    setJob(r.job_id);setLogs([]);setProg(0);setState('running');setStat('Starting…');
+    poll.current=setInterval(async()=>{
+      const s=await api('/api/status/'+r.job_id);
+      if(s.new_logs&&s.new_logs.length)setLogs(p=>[...p,...s.new_logs]);
+      setProg(s.progress||0);setStat(s.status_text||'');setState(s.state);
+      if(s.state!=='running'){clearInterval(poll.current);
+        if(s.state==='done'){toast('Discovery complete · '+((s.stats||{}).candidates_new||0)+' new candidates','ok');onDone&&onDone();}
+        else if(s.state==='error')toast('Run error: '+(s.error||''),'bad');}
+    },1400);};
+  const cancel=async()=>{if(job){await api('/api/cancel/'+job,{method:'POST'});setStat('Cancelling…');}};
+  useEffect(()=>()=>{if(poll.current)clearInterval(poll.current);},[]);
+  const running=state==='running';
+  return <div className="mscroll"><div className="disc">
+    <h2>Discovery sweep</h2>
+    <p className="lede">Pull job-change-ready candidates from Apollo — free People Search, no contact credits spent. Reveal email/phone later, per candidate.</p>
+    <div className="panel"><div className="kicker" style={{marginBottom:6}}>Target departments</div>
+      <div className="deptgrid">{DEPTS.map(([k,n,d])=><div key={k} className={cls('deptchk',depts.includes(k)&&'on')} onClick={()=>!running&&toggleD(k)}>
+        <span className={cls('sw',depts.includes(k)&&'on')}/><div><div className="dn">{n}</div><div className="dd">{d}</div></div></div>)}</div></div>
+    <div className="panel"><div className="kicker" style={{marginBottom:6}}>Regions</div>
+      <input className="inp sm" placeholder="Type a country and press Enter (e.g. India)" value={locIn} disabled={running} onChange={e=>setLocIn(e.target.value)} onKeyDown={addLoc}/>
+      <div className="chips">{locs.map(l=><span key={l} className="chip">{l}<button onClick={()=>!running&&setLocs(p=>p.filter(x=>x!==l))}>×</button></span>)}</div>
+      <div style={{display:'flex',gap:18,alignItems:'center',marginTop:16,flexWrap:'wrap'}}>
+        <div style={{flex:1,minWidth:200}}><div className="rangerow"><span className="kicker">Max candidates · {maxc}</span></div>
+          <input className="range" type="range" min="100" max="3000" step="100" value={maxc} disabled={running} onChange={e=>setMaxc(+e.target.value)}/></div>
+        <div className="toggle" style={{minWidth:200}} onClick={()=>!running&&setSeed(!seed)}><span className="tl">Focus on known agencies</span><span className={cls('sw',seed&&'on')}/></div>
+      </div></div>
+    {!job?<button className="btn btn-primary btn-block" style={{padding:'13px'}} onClick={start}>▶ Start discovery</button>:
+    <div className="panel">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+        <span className="kicker">{running?'Running':state==='done'?'Complete':state} · {stat}</span>
+        {running&&<button className="btn btn-danger btn-sm" onClick={cancel}>Cancel</button>}</div>
+      <div className="pbar"><i style={{width:prog+'%'}}/></div>
+      <div className="console" ref={cref}>{logs.length===0?<div className="l">Awaiting first results…</div>:
+        logs.map((l,i)=><div key={i} className={cls('l',/new,|complete|done/i.test(l)&&'hi')}>{l}</div>)}</div>
+      {!running&&<button className="btn btn-ghost btn-block btn-sm" style={{marginTop:12}} onClick={()=>{setJob(null);setLogs([]);}}>New sweep</button>}
+    </div>}
+  </div></div>;
+}
+
+/* ── Root app ────────────────────────────────────── */
+function App(){
+  const [authed,setAuthed]=useState(null),[tab,setTab]=useState('people');
+  const [stats,setStats]=useState({}),[meta,setMeta]=useState({});
+  const [pf,setPf]=useState({sort:'overall'});
+  const [person,setPerson]=useState(null),[company,setCompany]=useState(null);
+  const [toast,setToast]=useState(null),[rk,setRk]=useState(0);
+  const showToast=(m,k)=>{setToast({m,k});setTimeout(()=>setToast(null),3200);};
+  const refresh=()=>setRk(x=>x+1);
+  useEffect(()=>{(async()=>{const r=await api('/whoami');setAuthed(!!r.authenticated);})();},[]);
+  const loadStats=useCallback(async()=>{const r=await api('/api/stats');if(!r.__status||r.__status<400)setStats(r);
+    const m=await api('/api/filters');if(m.departments)setMeta(m);},[]);
+  useEffect(()=>{if(authed){loadStats();}},[authed,loadStats,rk]);
+  if(authed===null)return <div className="login-wrap"><span className="spin"/></div>;
+  if(!authed)return <Login onIn={()=>setAuthed(true)}/>;
+  const logout=async()=>{await api('/logout',{method:'POST'});setAuthed(false);};
+  return <div className="shell">
+    <div className="topbar">
+      <div className="brand-mark"><div className="brand-dot"/><div>
+        <div className="brand-name" style={{fontSize:15}}>RADIUS</div><div className="brand-sub">Talent Acquisition</div></div></div>
+      <div className="nav">{['people','companies','discovery'].map(t=>
+        <button key={t} className={cls(tab===t&&'on')} onClick={()=>setTab(t)}>{t}</button>)}</div>
+      <div className="spacer"/>
+      <div className="kpis">
+        <div className="kpi"><div className="v">{stats.candidates_total??'—'}</div><div className="l">Candidates</div></div>
+        <div className="kpi"><div className="v am">{stats.open_to_shift??'—'}</div><div className="l">Open to shift</div></div>
+        <div className="kpi"><div className="v">{stats.enriched??'—'}</div><div className="l">Enriched</div></div>
+        <div className="kpi"><div className="v">{stats.companies_total??'—'}</div><div className="l">Companies</div></div></div>
+      <button className="iconbtn" title="Log out" onClick={logout}>⏻</button>
+    </div>
+    {tab==='people'&&<div className="body"><PeopleFilters f={pf} setF={setPf} meta={meta}/>
+      <div className="main"><PeopleView filters={pf} setFilters={setPf} onPerson={setPerson} refreshKey={rk}/></div></div>}
+    {tab==='companies'&&<CompaniesView onCompany={setCompany}/>}
+    {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast}/></div>}
+
+    {person&&<><div className="scrim" onClick={()=>setPerson(null)}/>
+      <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast}/></>}
+    {company&&<><div className="scrim" onClick={()=>setCompany(null)}/>
+      <CompanyDrawer id={company} onClose={()=>setCompany(null)} onPerson={(pid)=>{setCompany(null);setPerson(pid);}}/></>}
+    {toast&&<div className={cls('toast',toast.k)}>{toast.k==='ok'?'✓':'⚠'} {toast.m}</div>}
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

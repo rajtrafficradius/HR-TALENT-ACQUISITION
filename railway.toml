@@ -1,0 +1,6 @@
+[deploy]
+# Single worker (-w 1) is MANDATORY: the daily scheduler thread, the in-memory
+# JobState registry, and the Apollo rate-limiter all rely on one process owning
+# the state. --timeout 600 covers long discovery runs (they execute in a daemon
+# thread, so the HTTP request itself returns immediately).
+startCommand = "gunicorn -w 1 -b 0.0.0.0:$PORT app:app --timeout 600 --graceful-timeout 30"

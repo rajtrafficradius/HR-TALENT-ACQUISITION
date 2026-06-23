@@ -1,0 +1,13 @@
+# Smart HR Talent Acquisition — runtime dependencies
+requests>=2.28.0
+beautifulsoup4>=4.11.0      # best-effort G2/Clutch company-domain crawl
+openai>=1.0.0               # optional intent/role refinement (graceful fallback if no key)
+flask>=2.3.0
+flask-cors>=4.0.0
+gunicorn>=21.0.0            # Railway production server (gunicorn -w 1 app:app)
+PyMySQL==1.1.0             # MySQL driver
+DBUtils==3.1.0             # PooledDB connection pool (ping=4 for Railway idle timeout)
+python-dotenv==1.0.1       # local .env loading
+
+# dev/test only (safe to keep installed)
+pytest>=7.0.0
