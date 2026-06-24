@@ -317,6 +317,7 @@ async function api(path,opts={}){
 }
 const cls=(...a)=>a.filter(Boolean).join(' ');
 const DEPT_LABEL={sales:'Sales',marketing:'Marketing',seo:'SEO',digital_marketing:'Digital Mktg',other:'Other'};
+const REGIONS=['India','Australia','United States','United Kingdom','Canada','United Arab Emirates','Singapore','Philippines','New Zealand','Ireland','Germany'];
 const titleCase=s=>(s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
 function scoreColor(v){v=+v||0; if(v>=75)return'var(--amber)'; if(v>=55)return'#cdd0d4'; if(v>=40)return'#86867f'; return'#54544f';}
 function fmtNum(n){ if(n==null)return'—'; if(n>=1e9)return(n/1e9).toFixed(1)+'B'; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'k'; return''+n; }
@@ -538,6 +539,8 @@ function CompaniesView({onCompany,meta}){
   return <div className="body"><div className="filters">
     <h3>Company filters</h3>
     <div className="fgroup"><label>Search</label><input className="inp sm" placeholder="Name or domain" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/></div>
+    <div className="fgroup"><label>Region</label><select className="inp sm" value={f.country} onChange={e=>setF({...f,country:e.target.value})}>
+      <option value="">All regions</option>{REGIONS.map(r=><option key={r} value={r}>{r}{cc[r]!=null?` (${cc[r]})`:''}</option>)}</select></div>
     <div className="fgroup"><label>Category</label><select className="inp sm" value={f.category} onChange={e=>setF({...f,category:e.target.value})}>
       <option value="">All categories</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min company quality</label><span className="rv">{f.min_quality||0}</span></div>
@@ -581,7 +584,7 @@ function PeopleFilters({f,setF,meta}){
     <div className="fgroup"><label>Category</label><select className="inp sm" value={f.category||''} onChange={e=>setF({...f,category:e.target.value})}>
       <option value="">All categories</option>{(meta.categories||[]).map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><label>Region</label><select className="inp sm" value={f.country||''} onChange={e=>setF({...f,country:e.target.value})}>
-      <option value="">All regions</option>{(meta.countries||['India','Australia']).map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+      <option value="">All regions</option>{REGIONS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><label>Department</label><select className="inp sm" value={f.department||''} onChange={e=>setF({...f,department:e.target.value})}>
       <option value="">All departments</option>{(meta.all_departments||[]).map(d=><option key={d} value={d}>{DEPT_LABEL[d]||d}</option>)}</select></div>
     <div className="fgroup"><label>Seniority</label><select className="inp sm" value={f.seniority||''} onChange={e=>setF({...f,seniority:e.target.value})}>
@@ -669,9 +672,14 @@ function DiscoveryView({onDone,toast,meta}){
       <div className="deptgrid">{groups.map(g=><div key={g.name} className={cls('deptchk',sel.includes(g.name)&&'on')} onClick={()=>!running&&toggleG(g.name)}>
         <span className={cls('sw',sel.includes(g.name)&&'on')}/><div><div className="dn">{g.name}</div>
           <div className="dd">{(g.categories||[]).slice(0,3).join(' · ')}{g.categories&&g.categories.length>3?' …':''}</div></div></div>)}</div>
-      <div style={{marginTop:14}}><div className="kicker" style={{marginBottom:6}}>Regions</div>
-        <input className="inp sm" placeholder="Type a country and press Enter" value={locIn} disabled={running} onChange={e=>setLocIn(e.target.value)} onKeyDown={addLoc}/>
-        <div className="chips">{locs.map(l=><span key={l} className="chip">{l}<button onClick={()=>!running&&setLocs(p=>p.filter(x=>x!==l))}>×</button></span>)}</div></div>
+      <div style={{marginTop:14}}><div className="kicker" style={{marginBottom:6}}>Regions to hunt</div>
+        <div style={{display:'flex',gap:8}}>
+          <select className="inp sm" style={{maxWidth:210}} value="" disabled={running}
+            onChange={e=>{const v=e.target.value; if(v)setLocs(p=>[...new Set([...p,v])]);}}>
+            <option value="">+ Add region…</option>{REGIONS.filter(r=>!locs.includes(r)).map(r=><option key={r} value={r}>{r}</option>)}</select>
+          <input className="inp sm" style={{flex:1}} placeholder="…or type a custom country and press Enter" value={locIn} disabled={running} onChange={e=>setLocIn(e.target.value)} onKeyDown={addLoc}/>
+        </div>
+        <div className="chips">{locs.length===0?<span className="kicker" style={{alignSelf:'center'}}>all regions (global)</span>:locs.map(l=><span key={l} className="chip">{l}<button onClick={()=>!running&&setLocs(p=>p.filter(x=>x!==l))}>×</button></span>)}</div></div>
       <div style={{display:'flex',gap:18,alignItems:'center',marginTop:16,flexWrap:'wrap'}}>
         <div style={{flex:1,minWidth:200}}><div className="rangerow"><span className="kicker">Max candidates · {maxc}</span></div>
           <input className="range" type="range" min="100" max="3000" step="100" value={maxc} disabled={running} onChange={e=>setMaxc(+e.target.value)}/></div>
