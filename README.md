@@ -30,9 +30,17 @@ index.html  React 18 + Babel SPA (no build step) — industrial black/white them
      continuously rotates the whole 28-category taxonomy across your regions, storing
      new companies & candidates around the clock — still 100% free. Toggle it off any
      time; the state persists in the database.
+   - **Relevance + size, free.** Discovery queries Apollo per **employee-band**
+     (`organization_num_employees_ranges`), so every company is stamped with its size
+     (10-level taxonomy: Solo → Global enterprise) for free, and giant 10,001+ firms
+     (Amazon/Tech-Mahindra scale) are excluded. A name blocklist drops banks, govt,
+     healthcare and mega-corps. Company **websites** are resolved free via Clearbit
+     autocomplete (name → domain) for existing + future companies — no Apollo credits.
    - **People View** filters by category, region, department, seniority, scores,
-     enrichment and freshness. **Company View** has **All / India / Australia** tabs
-     and a **category** filter (a company matches a category if any of its people do).
+     enrichment and freshness. **Company View** has **Global / India / Australia** tabs,
+     a **category** filter, a **company-size** filter (10 levels), and **min/max
+     employee** sliders. Candidate detail shows LinkedIn (exact after Enrich, else a
+     LinkedIn search link) and the company website.
 2. **Scoring.** Every candidate gets six deterministic scores (0–100):
    `technical`, `role_fit`, `job_change_intent`, `company_quality`, `freshness`,
    and a weighted `overall`. Sort/filter by any of them.

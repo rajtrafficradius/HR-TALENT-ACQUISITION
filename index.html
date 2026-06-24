@@ -317,7 +317,9 @@ async function api(path,opts={}){
 }
 const cls=(...a)=>a.filter(Boolean).join(' ');
 const DEPT_LABEL={sales:'Sales',marketing:'Marketing',seo:'SEO',digital_marketing:'Digital Mktg',other:'Other'};
-const REGIONS=['India','Australia','United States','United Kingdom','Canada','United Arab Emirates','Singapore','Philippines','New Zealand','Ireland','Germany'];
+const REGIONS=['India','Australia'];  // + "Global" (empty value = no region filter)
+const SIZE_LABELS=['Solo / Self-employed','Micro business','Small business','SME / Growing business','Lower mid-market','Mid-market','Enterprise','Large enterprise','Global enterprise','Unknown / Unverified'];
+const SIZE_RANGE={'Solo / Self-employed':'1','Micro business':'2–10','Small business':'11–50','SME / Growing business':'51–200','Lower mid-market':'201–500','Mid-market':'501–1,000','Enterprise':'1,001–5,000','Large enterprise':'5,001–10,000','Global enterprise':'10,001+','Unknown / Unverified':'no data'};
 const titleCase=s=>(s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
 function scoreColor(v){v=+v||0; if(v>=75)return'var(--amber)'; if(v>=55)return'#cdd0d4'; if(v>=40)return'#86867f'; return'#54544f';}
 function fmtNum(n){ if(n==null)return'—'; if(n>=1e9)return(n/1e9).toFixed(1)+'B'; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'k'; return''+n; }
@@ -417,8 +419,11 @@ function PersonDrawer({id,onClose,onChanged,toast}){
             <div className="cv" style={{flex:1}}>{c.email?c.email:<span className="cv dim">{c.has_email?'Available — not revealed':'Not available'}</span>}</div></div>
           <div className="contact-row"><div className="ci">☏</div>
             <div className="cv" style={{flex:1}}>{c.phone?c.phone:<span className="cv dim">{c.has_phone?'Available — not revealed':'Not available'}</span>}</div></div>
-          {c.linkedin_url&&<div className="contact-row"><div className="ci">in</div>
-            <a className="cv" href={c.linkedin_url} target="_blank" rel="noopener" style={{flex:1}}>{c.linkedin_url.replace(/^https?:\/\/(www\.)?/,'')}</a></div>}
+          <div className="contact-row"><div className="ci">in</div>
+            {c.linkedin_url?<a className="cv" href={c.linkedin_url} target="_blank" rel="noopener" style={{flex:1}}>{c.linkedin_url.replace(/^https?:\/\/(www\.)?/,'')}</a>:
+              <a className="cv" href={'https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent((c.full_name||'')+' '+(c.company_name||''))} target="_blank" rel="noopener" style={{flex:1}}>Search on LinkedIn ↗ <span style={{color:'var(--t4)'}}>(exact profile on Enrich)</span></a>}</div>
+          {(co&&(co.website_url||co.root_domain))&&<div className="contact-row"><div className="ci">🌐</div>
+            <a className="cv" href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener" style={{flex:1}}>{co.root_domain||co.website_url}</a></div>}
           {!enriched&&<div className="enrich-ctl">
             <label className="chk"><input type="checkbox" checked={rE} onChange={e=>setRE(e.target.checked)}/>Email</label>
             <label className="chk"><input type="checkbox" checked={rP} onChange={e=>setRP(e.target.checked)}/>Phone <span style={{color:'var(--t4)'}}>(more credits)</span></label>
@@ -436,11 +441,11 @@ function PersonDrawer({id,onClose,onChanged,toast}){
       {co&&<div className="sect"><div className="sect-h">Company</div>
         <div className="sgrid">
           <div className="kv"><span className="k">Name</span><span className="v">{co.name}</span></div>
-          <div className="kv"><span className="k">Domain</span><span className="v mono">{co.root_domain||'—'}</span></div>
-          <div className="kv"><span className="k">Industry</span><span className="v">{co.industry||'—'}</span></div>
+          <div className="kv"><span className="k">Website</span><span className="v">{co.root_domain?<a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain}</a>:'—'}</span></div>
+          <div className="kv"><span className="k">Company size</span><span className="v">{co.size_band||'—'}</span></div>
           <div className="kv"><span className="k">Employees</span><span className="v">{fmtNum(co.estimated_employees)}</span></div>
           <div className="kv"><span className="k">Quality</span><span className="v" style={{color:scoreColor(co.company_quality_score)}}>{co.company_quality_score}</span></div>
-          <div className="kv"><span className="k">Founded</span><span className="v">{co.founded_year||'—'}</span></div>
+          <div className="kv"><span className="k">Region</span><span className="v">{co.country||co.hq_country||'—'}</span></div>
         </div></div>}
 
       <div className="sect"><div className="sect-h">Provenance</div>
@@ -463,20 +468,24 @@ function CompanyDrawer({id,onClose,onPerson}){
   const co=d.company,ppl=d.people||[];
   return <div className="drawer">
     <div className="dhead"><div className="top"><div>
-      <h2>{co.name}</h2><div className="role mono">{co.root_domain||'domain pending enrichment'}</div></div>
+      <h2>{co.name}</h2><div className="role mono">{co.root_domain?
+        <a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain} ↗</a>:'website pending…'}</div></div>
       <button className="iconbtn" onClick={onClose}>✕</button></div>
-      <div className="dmeta">{co.industry&&<span className="tag">{co.industry}</span>}
-        {co.enriched?<span className="tag amber dot">Enriched</span>:<span className="tag">Name-matched</span>}</div></div>
+      <div className="dmeta">{co.size_band&&<span className="tag">{co.size_band}</span>}
+        {co.country&&<span className="tag">{co.country}</span>}
+        {co.industry&&<span className="tag">{co.industry}</span>}</div></div>
     <div className="dbody">
       <div className="sect"><div className="sect-h">Firmographics</div>
         <div className="scorebig" style={{marginBottom:16}}><Ring value={co.company_quality_score}/>
           <div><div className="kicker">Company quality</div>
-          <div style={{fontFamily:'var(--disp)',fontWeight:600,fontSize:15,marginTop:2}}>{fmtNum(co.estimated_employees)} employees</div></div></div>
+          <div style={{fontFamily:'var(--disp)',fontWeight:600,fontSize:15,marginTop:2}}>{co.size_band||(fmtNum(co.estimated_employees)+' employees')}</div></div></div>
         <div className="sgrid">
+          <div className="kv"><span className="k">Website</span><span className="v">{co.root_domain?<a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain} ↗</a>:'pending…'}</span></div>
+          <div className="kv"><span className="k">Company size</span><span className="v">{co.size_band||'—'}{co.estimated_employees?` · ~${fmtNum(co.estimated_employees)}`:''}</span></div>
+          <div className="kv"><span className="k">Region</span><span className="v">{co.country||co.hq_country||'—'}</span></div>
+          <div className="kv"><span className="k">Industry</span><span className="v">{co.industry||'—'}</span></div>
           <div className="kv"><span className="k">Revenue</span><span className="v">{co.annual_revenue?('$'+fmtNum(co.annual_revenue)):'—'}</span></div>
           <div className="kv"><span className="k">Founded</span><span className="v">{co.founded_year||'—'}</span></div>
-          <div className="kv"><span className="k">HQ</span><span className="v">{[co.hq_city,co.hq_country].filter(Boolean).join(', ')||'—'}</span></div>
-          <div className="kv"><span className="k">Website</span><span className="v">{co.website_url?<a href={co.website_url} target="_blank" rel="noopener">visit</a>:'—'}</span></div>
         </div></div>
       <div className="sect"><div className="sect-h">People &nbsp;<span style={{color:'var(--t4)'}}>{ppl.length}</span></div>
         <div className="rows">{ppl.map(p=><div key={p.id} className="row row-co" style={{gridTemplateColumns:'minmax(0,1.6fr) 80px 90px'}} onClick={()=>onPerson(p.id)}>
@@ -528,21 +537,28 @@ function PeopleView({filters,setFilters,onPerson,refreshKey}){
 const CSORTS=[['candidates','Most candidates'],['quality','Quality'],['employees','Employees'],['name','Name A-Z'],['recent','Recent']];
 function CompaniesView({onCompany,meta}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
-  const [f,setF]=useState({sort:'candidates',q:'',country:'',category:'',min_quality:0});
-  const cats=meta.categories||[]; const cc=meta.company_country_counts||{};
+  const [f,setF]=useState({sort:'candidates',q:'',country:'',category:'',size_band:'',min_employees:0,max_employees:100000,min_quality:0});
+  const cats=meta.categories||[]; const cc=meta.company_country_counts||{}; const sizes=meta.size_bands||SIZE_LABELS;
   const load=useCallback(async()=>{setLoading(true);
     const q=new URLSearchParams({page,page_size:25});
-    Object.entries(f).forEach(([k,v])=>{if(v!==''&&v!=null&&v!==0)q.set(k,v);});
+    Object.entries(f).forEach(([k,v])=>{
+      if(k==='max_employees'&&(!v||v>=100000))return;
+      if((k==='min_employees'||k==='min_quality')&&!v)return;
+      if(v!==''&&v!=null)q.set(k,v);});
     const r=await api('/api/companies?'+q.toString());setData(r.rows?r:{rows:[],total:0,total_pages:1});setLoading(false);},[f,page]);
   useEffect(()=>{load();},[load]); useEffect(()=>{setPage(1);},[JSON.stringify(f)]);
-  const reset=()=>setF({sort:'candidates',q:'',country:'',category:'',min_quality:0});
+  const reset=()=>setF({sort:'candidates',q:'',country:'',category:'',size_band:'',min_employees:0,max_employees:100000,min_quality:0});
   return <div className="body"><div className="filters">
     <h3>Company filters</h3>
     <div className="fgroup"><label>Search</label><input className="inp sm" placeholder="Name or domain" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/></div>
-    <div className="fgroup"><label>Region</label><select className="inp sm" value={f.country} onChange={e=>setF({...f,country:e.target.value})}>
-      <option value="">All regions</option>{REGIONS.map(r=><option key={r} value={r}>{r}{cc[r]!=null?` (${cc[r]})`:''}</option>)}</select></div>
     <div className="fgroup"><label>Category</label><select className="inp sm" value={f.category} onChange={e=>setF({...f,category:e.target.value})}>
       <option value="">All categories</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+    <div className="fgroup"><label>Company size</label><select className="inp sm" value={f.size_band} onChange={e=>setF({...f,size_band:e.target.value})}>
+      <option value="">Any size</option>{sizes.map(b=><option key={b} value={b}>{b}{SIZE_RANGE[b]?` (${SIZE_RANGE[b]})`:''}</option>)}</select></div>
+    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min employees</label><span className="rv">{f.min_employees||'any'}</span></div>
+      <input className="range" type="range" min="0" max="100000" step="25" value={f.min_employees} onChange={e=>setF({...f,min_employees:+e.target.value})}/></div>
+    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Max employees</label><span className="rv">{f.max_employees>=100000?'100k+':(f.max_employees||0).toLocaleString()}</span></div>
+      <input className="range" type="range" min="25" max="100000" step="25" value={f.max_employees} onChange={e=>setF({...f,max_employees:+e.target.value})}/></div>
     <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min company quality</label><span className="rv">{f.min_quality||0}</span></div>
       <input className="range" type="range" min="0" max="100" value={f.min_quality} onChange={e=>setF({...f,min_quality:+e.target.value})}/></div>
     <div className="fgroup"><label>Sort by</label><select className="inp sm" value={f.sort} onChange={e=>setF({...f,sort:e.target.value})}>
@@ -550,16 +566,18 @@ function CompaniesView({onCompany,meta}){
     <button className="btn btn-ghost btn-block btn-sm" onClick={reset}>Reset</button>
   </div><div className="main">
     <div className="mhead">
-      <div className="tabs">{[['','All'],['India','India'],['Australia','Australia']].map(([v,l])=>
+      <div className="tabs">{[['','Global'],['India','India'],['Australia','Australia']].map(([v,l])=>
         <button key={l} className={cls('tab',f.country===v&&'on')} onClick={()=>setF({...f,country:v})}>
           {l}<span className="tc">{cc[v||'All']??''}</span></button>)}</div>
-      <div className="spacer"/><div className="count"><b>{data.total}</b> {f.category||'companies'}</div></div>
+      <div className="spacer"/><div className="count"><b>{data.total}</b> {f.size_band||f.category||'companies'}</div></div>
     <div className="mscroll">{loading?<div className="empty"><span className="spin"/></div>:
       data.rows.length===0?<div className="empty"><div className="big">No companies match</div>
-        <div>Try “All” regions, or turn on Auto-hunt in Discovery to populate.</div></div>:
+        <div>Widen the size range or region, or turn on Auto-hunt in Discovery.</div></div>:
       <div className="rows">{data.rows.map(co=><div key={co.id} className="row row-co" onClick={()=>onCompany(co.id)}>
-        <div className="cell-co"><div className="cn" style={{fontSize:14.5}}>{co.name}</div><div className="cd">{co.root_domain||'domain pending enrichment'}</div></div>
-        <div className="col-hide"><div className="cell-sub">Region</div><div style={{fontSize:12.5,color:'var(--t2)'}}>{co.country||co.hq_country||'—'}</div></div>
+        <div className="cell-co"><div className="cn" style={{fontSize:14.5}}>{co.name}</div>
+          <div className="cd">{co.root_domain?<a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}>{co.root_domain}</a>:'website pending…'}</div></div>
+        <div className="col-hide"><div className="cell-sub">Size</div><div style={{fontSize:12,color:'var(--t2)'}}>{co.size_band||'—'}</div>
+          <div className="cd">{co.country||co.hq_country||''}</div></div>
         <div style={{display:'flex',gap:16,alignItems:'center'}}>
           <div><div className="cell-sub">People</div><div className="bignum">{co.candidate_count}</div></div>
           <div><div className="cell-sub">Open</div><div className="bignum" style={{color:co.open_count>0?'var(--amber)':'var(--t3)'}}>{co.open_count}</div></div></div>
@@ -584,7 +602,7 @@ function PeopleFilters({f,setF,meta}){
     <div className="fgroup"><label>Category</label><select className="inp sm" value={f.category||''} onChange={e=>setF({...f,category:e.target.value})}>
       <option value="">All categories</option>{(meta.categories||[]).map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><label>Region</label><select className="inp sm" value={f.country||''} onChange={e=>setF({...f,country:e.target.value})}>
-      <option value="">All regions</option>{REGIONS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+      <option value="">Global (all)</option>{REGIONS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><label>Department</label><select className="inp sm" value={f.department||''} onChange={e=>setF({...f,department:e.target.value})}>
       <option value="">All departments</option>{(meta.all_departments||[]).map(d=><option key={d} value={d}>{DEPT_LABEL[d]||d}</option>)}</select></div>
     <div className="fgroup"><label>Seniority</label><select className="inp sm" value={f.seniority||''} onChange={e=>setF({...f,seniority:e.target.value})}>

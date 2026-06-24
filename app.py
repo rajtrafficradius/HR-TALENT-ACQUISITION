@@ -289,6 +289,9 @@ def api_filters():
         "companies": db.CandidateRepo.companies_for_filter(),
         "countries": ["India", "Australia"],
         "company_country_counts": db.CompanyRepo.country_counts(),
+        "size_bands": core.SIZE_LABELS,                       # 10-level size taxonomy
+        "size_band_ranges": {b[2]: [b[0], b[1]] for b in core.SIZE_BANDS},
+        "company_size_counts": db.CompanyRepo.size_band_counts(),
         "enrichment_statuses": ["not_enriched", "enriching", "enriched", "failed", "no_credits"],
         "all_departments": ["sales", "marketing", "seo", "digital_marketing", "other"],
     })
@@ -328,8 +331,9 @@ def api_companies():
     if (r := _require_db()):
         return r
     page, page_size = _page_args()
-    filters = {k: request.args.get(k) for k in ("country", "category", "min_quality", "q", "sort")
-               if request.args.get(k) not in (None, "")}
+    filters = {k: request.args.get(k) for k in (
+        "country", "category", "min_quality", "min_employees", "max_employees",
+        "size_band", "q", "sort") if request.args.get(k) not in (None, "")}
     rows, total = db.CompanyRepo.list_page(filters, page, page_size)
     return jsonify({"rows": rows, "total": total, "page": page, "page_size": page_size,
                     "total_pages": max(1, -(-total // page_size))})

@@ -149,6 +149,8 @@ class ApolloClient:
             payload["person_locations"] = query["person_locations"]
         if query.get("organization_locations"):
             payload["organization_locations"] = query["organization_locations"]
+        if query.get("organization_num_employees_ranges"):
+            payload["organization_num_employees_ranges"] = query["organization_num_employees_ranges"]
         if query.get("seed_domains"):
             payload["q_organization_domains_list"] = query["seed_domains"][:1000]
         resp = self._post(url, payload)
@@ -297,14 +299,16 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")[:120]
 
 
-def company_key_for(name: str, domain: str) -> str:
-    """Stable dedup key: the domain when known, else a name-slug. The FREE Apollo
-    search gives only the org NAME, so most companies key by name until enriched."""
-    d = normalize_domain(domain)
-    if d:
-        return d
+def company_key_for(name: str, domain: str = "") -> str:
+    """Stable name-based dedup key. We key by NAME (not domain) because the free
+    Apollo search only gives the org name and the domain is resolved later (Clearbit);
+    keying by name keeps dedup stable so resolving a domain never creates a duplicate.
+    Falls back to a normalized domain only when the name is empty."""
     sl = _slug(name)
-    return f"name:{sl}" if sl else ""
+    if sl:
+        return f"name:{sl}"
+    d = normalize_domain(domain)
+    return d or ""
 
 
 def extract_org(person: dict) -> dict:
@@ -520,6 +524,130 @@ def classify_category(title: str = "", headline: str = "") -> Optional[str]:
         if any(tok in text for tok in c["match"]):
             return c["label"]
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Company size bands, relevance filter, free domain resolution
+# ═══════════════════════════════════════════════════════════════════════════
+
+# (min, max, label) — matches the HR size taxonomy. `max` is inclusive; the giant
+# band (10001+) is excluded from discovery by default to drop Amazon/Tech-Mahindra
+# scale firms (turn on with HR_INCLUDE_GIANTS=1).
+SIZE_BANDS = [
+    (1, 1, "Solo / Self-employed"),
+    (2, 10, "Micro business"),
+    (11, 50, "Small business"),
+    (51, 200, "SME / Growing business"),
+    (201, 500, "Lower mid-market"),
+    (501, 1000, "Mid-market"),
+    (1001, 5000, "Enterprise"),
+    (5001, 10000, "Large enterprise"),
+    (10001, 5000000, "Global enterprise"),
+]
+SIZE_LABELS = [b[2] for b in SIZE_BANDS] + ["Unknown / Unverified"]
+_GIANT_LABEL = "Global enterprise"
+
+
+def size_band_label(employees: Optional[int]) -> str:
+    if not isinstance(employees, int) or employees <= 0:
+        return "Unknown / Unverified"
+    for lo, hi, label in SIZE_BANDS:
+        if lo <= employees <= hi:
+            return label
+    return "Global enterprise"
+
+
+def discovery_size_bands() -> List[Tuple[int, int, str]]:
+    """The employee bands used as a discovery query axis (giants excluded by default)."""
+    bands = SIZE_BANDS if _env("HR_INCLUDE_GIANTS", "0") == "1" else SIZE_BANDS[:-1]
+    return bands
+
+
+# ── Relevance filter: we're an SEO/digital-marketing firm, so drop banks, govt,
+#    healthcare, education, mega-corporations, etc. Two tiers + an allow-list:
+#    HARD blocks always win (banks, giants); SOFT blocks are overridden by a clear
+#    agency/marketing/tech allow-signal. Robust, no fragile industry-tag IDs. ───────
+_HARD_BLOCK = [
+    # finance (a "marketing" team at a bank is not who we source)
+    "bank", "banking", "insurance", "assurance", "mutual fund", "securities",
+    "capital markets", "stock exchange", "asset management", "wealth management",
+    "credit union", "non banking", "nbfc", "fintech",
+    # public sector / institutions
+    "government", "ministry", "municipal", "council", "public sector", "defence",
+    "defense", "police", "university", "college", "institute of technology",
+    "school district",
+    # healthcare
+    "hospital", "clinic", "healthcare", "pharmaceutic", "pharma ", "medical center",
+    "diagnostics",
+    # well-known mega-corporations (200k+ / not agency talent pools)
+    "amazon", "tech mahindra", "infosys", "wipro", "tata consultancy", "tcs ",
+    "hcl tech", "hcltech", "cognizant", "capgemini", "accenture", "genpact",
+    "deloitte", "ernst & young", "kpmg", "pricewaterhouse", "pwc ", "ibm ",
+    "reliance", "adani", "flipkart", "walmart", "jpmorgan", "wells fargo",
+    "concentrix", "teleperformance", "foxconn",
+    "nocree",
+]
+_SOFT_BLOCK = [
+    "airlines", "airways", "aviation", "railways", "petroleum", "oil & gas",
+    "oil and gas", "power plant", "electricity board", "steel", "cement", "mining",
+    "automobile", "manufacturing plant", "freight", "logistics & supply",
+    "real estate", "construction", "hospitality", "restaurant", "hotel",
+]
+_ALLOW_TOKENS = ["seo", "digital marketing", "digital agency", "marketing", "advertis",
+                 "agency", "media", "creative", "design", "software", "web develop",
+                 "growth", "performance marketing", "analytics", "studio", "interactive",
+                 "e-commerce", "ecommerce", "tech labs", "martech"]
+
+
+def is_relevant_company(name: str) -> bool:
+    """True if the company looks relevant to an SEO/digital-marketing talent search."""
+    n = (name or "").lower().strip()
+    if not n:
+        return True
+    if any(b in n for b in _HARD_BLOCK):
+        return False
+    if any(a in n for a in _ALLOW_TOKENS):
+        return True
+    return not any(b in n for b in _SOFT_BLOCK)
+
+
+# ── Free company-domain resolution via Clearbit autocomplete (no key, no Apollo
+#    credits). Maps a company NAME → its primary domain so we can show the website. ─
+_domain_cache: Dict[str, Optional[str]] = {}
+_domain_limiter = RateLimiter(0.25)
+
+
+def resolve_company_domain(name: str) -> Optional[str]:
+    """Best-effort free name→domain lookup (Clearbit autocomplete). Cached; returns
+    None on any failure. Never raises, never costs credits."""
+    n = (name or "").strip()
+    if not n:
+        return None
+    key = n.lower()
+    if key in _domain_cache:
+        return _domain_cache[key]
+    domain = None
+    try:
+        _domain_limiter.wait()
+        r = requests.get("https://autocomplete.clearbit.com/v1/companies/suggest",
+                         params={"query": n}, timeout=10)
+        if r.status_code == 200:
+            for item in (r.json() or []):
+                d = normalize_domain(item.get("domain") or "")
+                if d:
+                    domain = d
+                    break
+    except Exception:
+        domain = None
+    _domain_cache[key] = domain
+    return domain
+
+
+def linkedin_search_url(full_name: str, company: str = "") -> str:
+    """A LinkedIn people-search URL (free) for when we don't have the exact profile."""
+    from urllib.parse import quote
+    q = quote(f"{full_name or ''} {company or ''}".strip())
+    return f"https://www.linkedin.com/search/results/people/?keywords={q}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -928,6 +1056,11 @@ def person_to_candidate(person: dict, target_families: List[str],
         dept = classify_department(title, headline, departments, functions)
         if dept == "other" and ctx.get("family"):
             dept = ctx["family"]
+    # Free firmographics are thin, but the employee-band query tells us company size —
+    # inject the band midpoint so company_quality reflects real size.
+    if not org.get("estimated_employees") and isinstance(ctx.get("size_min"), int) \
+            and isinstance(ctx.get("size_max"), int):
+        org["estimated_employees"] = (ctx["size_min"] + min(ctx["size_max"], 100000)) // 2
     cq = score_company_quality(org)
     technical = score_technical(base)
     role_fit = score_role_fit(base, target_families)
@@ -1083,34 +1216,42 @@ SENIORITY_GROUPS = [
 _CAT_BY_LABEL = {c["label"]: c for c in CATEGORIES}
 
 
+# Broad professional-seniority filter applied to every cell (keeps results to real
+# professionals without exploding the query count). Exact seniority is filled on enrich.
+BROAD_SENIORITIES = ["owner", "founder", "c_suite", "partner", "vp", "head",
+                     "director", "manager", "senior"]
+
+
 def build_search_queries(cfg: dict) -> List[dict]:
-    """Cartesian product of {category} × {seniority group} × {country}. Each cell is
-    a separate paged Apollo search (the 50k cap is per-query, so partitioning broadens
-    coverage). The per-country split stamps a definite country onto results (the thin
-    free search omits location), powering the Company-view country tabs. `ctx` carries
-    category/department/seniority/country to backfill the omitted fields."""
+    """Cartesian product of {category} × {country} × {employee-band}. Each cell is a
+    separate paged Apollo search. The per-country split stamps a definite region; the
+    per-employee-band split (organization_num_employees_ranges) stamps a definite
+    company SIZE for FREE (the thin search omits the count) and excludes giant firms.
+    `ctx` carries category/department/country/size to backfill the omitted fields."""
     cat_labels = cfg.get("categories") or CATEGORY_LABELS
     locations = cfg.get("person_locations") or [None]   # None = global (no geo filter)
     org_locations = cfg.get("organization_locations") or []
     seed_domains = cfg.get("seed_domains") or []
+    bands = cfg.get("size_bands") or discovery_size_bands()
     queries = []
     for country in locations:
         for label in cat_labels:
             cat = _CAT_BY_LABEL.get(label)
             if not cat:
                 continue
-            for grp in SENIORITY_GROUPS:
-                tag = f"{label}/{grp['name']}" + (f"/{country}" if country else "")
+            for lo, hi, slabel in bands:
+                tag = f"{label}/{slabel}" + (f"/{country}" if country else "")
                 queries.append({
                     "department": cat["dept"], "category": label, "label": tag,
                     "person_titles": cat["titles"],
-                    "person_seniorities": grp["seniorities"],
+                    "person_seniorities": BROAD_SENIORITIES,
                     "q_keywords": cat["kw"],
                     "person_locations": [country] if country else [],
                     "organization_locations": org_locations,
+                    "organization_num_employees_ranges": [f"{lo},{hi}"],
                     "seed_domains": seed_domains,
-                    "ctx": {"family": cat["dept"], "category": label,
-                            "seniority": grp["repr"], "country": country},
+                    "ctx": {"family": cat["dept"], "category": label, "country": country,
+                            "size_label": slabel, "size_min": lo, "size_max": hi},
                 })
     return queries
 
@@ -1168,6 +1309,10 @@ def run_discovery(run_id: int, params: dict, job) -> dict:
     processed = 0
     per_page = 100
     cap_page = 500  # 50k / 100
+    # Per-cell cap: bound how many candidates each (category × region × size-band) cell
+    # contributes, so a capped run samples ALL bands/categories evenly instead of
+    # exhausting on the first cell (otherwise every company comes back "Solo").
+    per_cell_cap = _env_int("HR_MAX_PER_CELL", 40)
 
     job.log(f"Discovery start - {len(queries)} query cells, regions={cfg['person_locations'] or 'global'}")
 
@@ -1175,28 +1320,40 @@ def run_discovery(run_id: int, params: dict, job) -> dict:
         if job.cancel_flag or processed >= max_candidates:
             break
         job.status_text = f"Searching {q['label']}"
+        cell_count = 0
         for page in range(1, max_pages + 1):
-            if job.cancel_flag or processed >= max_candidates:
+            if job.cancel_flag or processed >= max_candidates or cell_count >= per_cell_cap:
                 break
             people, total = apollo.search_people(q, page, per_page)
             stats["apollo_search_calls"] += 1
             job.log(f"  {q['label']} p{page}: {len(people)} people")
             if not people:
                 break
+            ctx = q.get("ctx") or {}
             for person in people:
                 pid = str(person.get("id") or "")
                 if not pid or pid in seen_ids:
                     continue
                 seen_ids.add(pid)
-                cand = person_to_candidate(person, target_families, now, ctx=q.get("ctx"))
+                org_name = ((person.get("organization") or {}).get("name")) or ""
+                if not is_relevant_company(org_name):
+                    continue  # skip banks/govt/healthcare/etc. (and their people)
+                cand = person_to_candidate(person, target_families, now, ctx=ctx)
                 org = cand.pop("_org", {})
                 company_id = None
+                # Size stamped from the employee-band query cell (free, exact band).
+                smin, smax = ctx.get("size_min"), ctx.get("size_max")
+                est_emp = org.get("estimated_employees")
+                if not est_emp and isinstance(smin, int) and isinstance(smax, int):
+                    est_emp = (smin + min(smax, 100000)) // 2
                 if org.get("company_key"):
                     comp = {"company_key": org["company_key"], "name": org.get("name") or "Unknown",
                             "apollo_org_id": org.get("apollo_org_id"),
                             "root_domain": org.get("root_domain"),
                             "industry": org.get("industry"),
-                            "estimated_employees": org.get("estimated_employees"),
+                            "estimated_employees": est_emp,
+                            "size_band": ctx.get("size_label") or size_band_label(est_emp),
+                            "size_min": smin, "size_max": smax,
                             "annual_revenue": org.get("annual_revenue"),
                             "founded_year": org.get("founded_year"),
                             "hq_city": org.get("hq_city"), "hq_country": org.get("hq_country"),
@@ -1214,12 +1371,13 @@ def run_discovery(run_id: int, params: dict, job) -> dict:
                     _cid, is_new = db.CandidateRepo.upsert(cand, run_id)
                     stats["candidates_new" if is_new else "candidates_refreshed"] += 1
                     processed += 1
+                    cell_count += 1
                 except Exception as e:
                     log.warning("candidate upsert failed: %s", e)
-                if processed >= max_candidates:
+                if processed >= max_candidates or cell_count >= per_cell_cap:
                     break
-            # Robust stop: partial page = last page (free tier omits a reliable total).
-            if len(people) < per_page or page >= cap_page:
+            # Robust stop: partial page = last page, per-cell cap, or 50k page cap.
+            if len(people) < per_page or page >= cap_page or cell_count >= per_cell_cap:
                 if page >= cap_page:
                     job.log(f"  {q['label']}: hit Apollo 50k cap - filter is broad")
                 break
@@ -1235,6 +1393,35 @@ def run_discovery(run_id: int, params: dict, job) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 #  Enrichment (COSTS credits — gated behind the UI Enrich button)
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+def backfill_company_domains(limit: int = 50, logf=None) -> int:
+    """Resolve domains (free Clearbit) for companies missing one. Marks each attempted
+    so failures aren't retried forever. Returns count newly resolved."""
+    rows = db.CompanyRepo.missing_domain(limit)
+    found = 0
+    for r in rows:
+        d = resolve_company_domain(r.get("name") or "")
+        website = f"https://{d}" if d else None
+        try:
+            db.CompanyRepo.set_domain(r["id"], d, website)
+            if d:
+                found += 1
+        except Exception as e:
+            log.warning("set_domain failed for %s: %s", r.get("id"), e)
+    if logf and rows:
+        logf(f"Domain backfill: {found}/{len(rows)} resolved")
+    return found
+
+
+def cleanup_irrelevant_companies(limit: int = 5000) -> int:
+    """Delete existing companies (and their candidates) that fail the relevance filter
+    (banks, govt, healthcare, etc.). One-time/periodic housekeeping."""
+    rows = db.CompanyRepo.all_id_name(limit)
+    drop = [r["id"] for r in rows if not is_relevant_company(r.get("name") or "")]
+    if drop:
+        db.CompanyRepo.delete_with_candidates(drop)
+    return len(drop)
 
 
 def enrich_candidate(candidate_id: int, reveal_email: bool = True,
@@ -1424,6 +1611,12 @@ def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
             if due:
                 db.CandidateRepo.recompute_freshness_all(_env_int("HR_INTENT_OPEN_THRESHOLD", 60))
                 db.SettingsRepo.set("freshness_at", now_utc().isoformat())
+
+            # Progressively resolve company websites (free Clearbit), paced every tick.
+            try:
+                backfill_company_domains(_env_int("HUNT_DOMAIN_BACKFILL_PER_TICK", 40))
+            except Exception as e:
+                log.warning("domain backfill error: %s", e)
 
             if not auto_hunt_enabled():
                 continue

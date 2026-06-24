@@ -280,6 +280,9 @@ _SCHEMA_SQL: Sequence[str] = (
         linkedin_url          VARCHAR(512) NULL,
         industry              VARCHAR(128) NULL,
         estimated_employees   INT NULL,
+        size_band             VARCHAR(48) NULL,
+        size_min              INT NULL,
+        size_max              INT NULL,
         annual_revenue        BIGINT NULL,
         founded_year          SMALLINT NULL,
         hq_city               VARCHAR(128) NULL,
@@ -287,6 +290,7 @@ _SCHEMA_SQL: Sequence[str] = (
         country               VARCHAR(64) NULL,
         company_quality_score TINYINT UNSIGNED NOT NULL DEFAULT 0,
         enriched              TINYINT(1) NOT NULL DEFAULT 0,
+        domain_checked        TINYINT(1) NOT NULL DEFAULT 0,
         source                ENUM('apollo','seed','g2','clutch','manual') NOT NULL DEFAULT 'apollo',
         run_id                BIGINT UNSIGNED NULL,
         confidence            TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -299,6 +303,9 @@ _SCHEMA_SQL: Sequence[str] = (
         KEY idx_company_domain (root_domain),
         KEY idx_company_quality (company_quality_score),
         KEY idx_company_country (country),
+        KEY idx_company_size (estimated_employees),
+        KEY idx_company_band (size_band),
+        KEY idx_company_domchk (domain_checked),
         KEY idx_company_industry (industry)
     ) {_TBL}
     """,
@@ -414,11 +421,18 @@ _SCHEMA_SQL: Sequence[str] = (
 _MIGRATIONS = (
     ("companies", "country", "ALTER TABLE companies ADD COLUMN country VARCHAR(64) NULL"),
     ("candidates", "category", "ALTER TABLE candidates ADD COLUMN category VARCHAR(64) NULL"),
+    ("companies", "size_band", "ALTER TABLE companies ADD COLUMN size_band VARCHAR(48) NULL"),
+    ("companies", "size_min", "ALTER TABLE companies ADD COLUMN size_min INT NULL"),
+    ("companies", "size_max", "ALTER TABLE companies ADD COLUMN size_max INT NULL"),
+    ("companies", "domain_checked", "ALTER TABLE companies ADD COLUMN domain_checked TINYINT(1) NOT NULL DEFAULT 0"),
 )
 _MIGRATION_INDEXES = (
     ("companies", "idx_company_country", "ALTER TABLE companies ADD KEY idx_company_country (country)"),
     ("candidates", "idx_cand_category", "ALTER TABLE candidates ADD KEY idx_cand_category (category)"),
     ("candidates", "idx_cand_country", "ALTER TABLE candidates ADD KEY idx_cand_country (location_country)"),
+    ("companies", "idx_company_size", "ALTER TABLE companies ADD KEY idx_company_size (estimated_employees)"),
+    ("companies", "idx_company_band", "ALTER TABLE companies ADD KEY idx_company_band (size_band)"),
+    ("companies", "idx_company_domchk", "ALTER TABLE companies ADD KEY idx_company_domchk (domain_checked)"),
 )
 
 
@@ -575,15 +589,17 @@ class CompanyRepo:
             (c.get("company_key") or "")[:255], c.get("apollo_org_id"),
             (c.get("name") or "")[:255], c.get("root_domain"), c.get("website_url"),
             c.get("linkedin_url"), c.get("industry"), c.get("estimated_employees"),
+            c.get("size_band"), c.get("size_min"), c.get("size_max"),
             c.get("annual_revenue"), c.get("founded_year"), c.get("hq_city"),
             c.get("hq_country"), c.get("country"), int(c.get("company_quality_score") or 0),
             c.get("source", "apollo"), run_id, int(c.get("confidence") or 0),
             _dumps(c.get("payload_json")))
         sql = (
             "INSERT INTO companies (company_key,apollo_org_id,name,root_domain,website_url,"
-            "linkedin_url,industry,estimated_employees,annual_revenue,founded_year,hq_city,"
+            "linkedin_url,industry,estimated_employees,size_band,size_min,size_max,"
+            "annual_revenue,founded_year,hq_city,"
             "hq_country,country,company_quality_score,source,run_id,confidence,payload_json) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             "ON DUPLICATE KEY UPDATE name=VALUES(name),"
             "apollo_org_id=COALESCE(VALUES(apollo_org_id),apollo_org_id),"
             "root_domain=COALESCE(VALUES(root_domain),root_domain),"
@@ -591,6 +607,9 @@ class CompanyRepo:
             "linkedin_url=COALESCE(VALUES(linkedin_url),linkedin_url),"
             "industry=COALESCE(VALUES(industry),industry),"
             "estimated_employees=COALESCE(VALUES(estimated_employees),estimated_employees),"
+            "size_band=COALESCE(VALUES(size_band),size_band),"
+            "size_min=COALESCE(VALUES(size_min),size_min),"
+            "size_max=COALESCE(VALUES(size_max),size_max),"
             "annual_revenue=COALESCE(VALUES(annual_revenue),annual_revenue),"
             "founded_year=COALESCE(VALUES(founded_year),founded_year),"
             "hq_city=COALESCE(VALUES(hq_city),hq_city),"
@@ -629,6 +648,56 @@ class CompanyRepo:
             conn.commit()
 
     @staticmethod
+    def missing_domain(limit: int = 50) -> List[dict]:
+        # Resolve the most-populated companies first (best UX — top of the list).
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT co.id, co.name FROM companies co "
+                    "WHERE co.root_domain IS NULL AND co.domain_checked=0 "
+                    "ORDER BY (SELECT COUNT(*) FROM candidates c WHERE c.company_id=co.id) DESC, "
+                    "co.id DESC LIMIT %s", (limit,))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def set_domain(company_id: int, domain: Optional[str], website: Optional[str]) -> None:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET root_domain=%s, "
+                            "website_url=COALESCE(%s,website_url), domain_checked=1, "
+                            "last_verified_at=NOW() WHERE id=%s", (domain, website, company_id))
+            conn.commit()
+
+    @staticmethod
+    def all_id_name(limit: int = 5000) -> List[dict]:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, name FROM companies ORDER BY id DESC LIMIT %s", (limit,))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def delete_with_candidates(ids) -> int:
+        ids = list(ids)
+        if not ids:
+            return 0
+        ph = ",".join(["%s"] * len(ids))
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM candidates WHERE company_id IN ({ph})", ids)
+                cur.execute(f"DELETE FROM companies WHERE id IN ({ph})", ids)
+                n = cur.rowcount
+            conn.commit()
+        return int(n)
+
+    @staticmethod
+    def size_band_counts() -> dict:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COALESCE(size_band,'Unknown / Unverified') AS b, COUNT(*) AS c "
+                            "FROM companies GROUP BY b")
+                return {r["b"]: int(r["c"]) for r in (cur.fetchall() or [])}
+
+    @staticmethod
     def get(company_id: int) -> Optional[dict]:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -663,6 +732,16 @@ class CompanyRepo:
             where.append("EXISTS (SELECT 1 FROM candidates c "
                          "WHERE c.company_id=companies.id AND c.category=%s)")
             params.append(filters["category"])
+        # Employee-count slider + size-category filters.
+        if filters.get("min_employees"):
+            where.append("estimated_employees>=%s"); params.append(int(filters["min_employees"]))
+        if filters.get("max_employees"):
+            where.append("estimated_employees<=%s"); params.append(int(filters["max_employees"]))
+        if filters.get("size_band"):
+            if filters["size_band"] == "Unknown / Unverified":
+                where.append("(size_band IS NULL OR size_band=%s)"); params.append(filters["size_band"])
+            else:
+                where.append("size_band=%s"); params.append(filters["size_band"])
         wsql = " AND ".join(where)
         sort_map = {"quality": "company_quality_score DESC",
                     "employees": "estimated_employees DESC", "name": "name ASC",
@@ -674,7 +753,8 @@ class CompanyRepo:
                 total = int(cur.fetchone()["c"])
                 cur.execute(
                     "SELECT id, name, company_key, root_domain, website_url, linkedin_url, "
-                    "industry, estimated_employees, annual_revenue, founded_year, hq_country, "
+                    "industry, estimated_employees, size_band, size_min, size_max, "
+                    "annual_revenue, founded_year, hq_country, "
                     "country, company_quality_score, enriched, source, discovered_at, last_verified_at, "
                     "(SELECT COUNT(*) FROM candidates c WHERE c.company_id=companies.id) "
                     "AS candidate_count, "
