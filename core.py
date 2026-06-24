@@ -1414,6 +1414,77 @@ def backfill_company_domains(limit: int = 50, logf=None) -> int:
     return found
 
 
+def sync_company_roster(company: dict, max_people: Optional[int] = None, logf=None) -> int:
+    """Pull EVERY person Apollo has for a company (domain-scoped, no title filter) and
+    attach them all to that company — so each company has its full employee roster, not
+    just the handful found by category discovery. FREE (search only). Returns count."""
+    cid = company.get("id")
+    name = company.get("name") or ""
+    domain = company.get("root_domain")
+    if not cid:
+        return 0
+    max_people = max_people or _env_int("HR_MAX_ROSTER_PER_COMPANY", 400)
+    now = now_utc()
+    ctx = {"country": company.get("country"), "size_min": company.get("size_min"),
+           "size_max": company.get("size_max"), "size_label": company.get("size_band")}
+    if domain:
+        query = {"seed_domains": [domain]}      # q_organization_domains_list — precise
+        strict_slug = None
+    else:
+        query = {"q_keywords": name}            # fallback: keyword, filtered to exact name
+        strict_slug = _slug(name)
+    apollo = get_apollo()
+    seen: set = set()
+    count = 0
+    for page in range(1, 200):
+        people, _ = apollo.search_people(query, page, 100)
+        if not people:
+            break
+        for person in people:
+            pid = str(person.get("id") or "")
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            if strict_slug:
+                org_name = ((person.get("organization") or {}).get("name")) or ""
+                if _slug(org_name) != strict_slug:
+                    continue
+            cand = person_to_candidate(person, list(ROLE_FAMILIES.keys()), now, ctx=ctx)
+            cand.pop("_org", None)
+            cand["company_id"] = cid
+            cand["company_name"] = name
+            cand["company_domain"] = domain
+            try:
+                db.CandidateRepo.upsert(cand, None)
+                count += 1
+            except Exception as e:
+                log.warning("roster upsert failed: %s", e)
+            if count >= max_people:
+                break
+        if count >= max_people or len(people) < 100:
+            break
+    db.CompanyRepo.mark_roster_synced(cid, count)
+    if logf:
+        logf(f"  roster {name[:30]}: {count} people")
+    return count
+
+
+def roster_sync_batch(limit: int = 4, logf=None) -> Tuple[int, int]:
+    """Roster-sync the next batch of companies needing it. Returns (people_added, companies)."""
+    companies = db.CompanyRepo.roster_pending(limit)
+    total = 0
+    for co in companies:
+        try:
+            total += sync_company_roster(co, logf=logf)
+        except Exception as e:
+            log.warning("roster sync failed for %s: %s", co.get("name"), e)
+            try:
+                db.CompanyRepo.mark_roster_synced(co["id"], 0)  # don't get stuck on it
+            except Exception:
+                pass
+    return total, len(companies)
+
+
 def cleanup_irrelevant_companies(limit: int = 5000) -> int:
     """Delete existing companies (and their candidates) that fail the relevance filter
     (banks, govt, healthcare, etc.). One-time/periodic housekeeping."""
@@ -1617,6 +1688,14 @@ def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
                 backfill_company_domains(_env_int("HUNT_DOMAIN_BACKFILL_PER_TICK", 40))
             except Exception as e:
                 log.warning("domain backfill error: %s", e)
+
+            # Progressively pull each company's FULL employee roster (free), paced.
+            try:
+                added, n = roster_sync_batch(_env_int("HUNT_ROSTER_PER_TICK", 4))
+                if added:
+                    log.info("roster sync: +%d people across %d companies", added, n)
+            except Exception as e:
+                log.warning("roster sync error: %s", e)
 
             if not auto_hunt_enabled():
                 continue

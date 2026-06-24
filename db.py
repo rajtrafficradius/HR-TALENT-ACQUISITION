@@ -291,6 +291,8 @@ _SCHEMA_SQL: Sequence[str] = (
         company_quality_score TINYINT UNSIGNED NOT NULL DEFAULT 0,
         enriched              TINYINT(1) NOT NULL DEFAULT 0,
         domain_checked        TINYINT(1) NOT NULL DEFAULT 0,
+        roster_synced_at      DATETIME NULL,
+        roster_count          INT NOT NULL DEFAULT 0,
         source                ENUM('apollo','seed','g2','clutch','manual') NOT NULL DEFAULT 'apollo',
         run_id                BIGINT UNSIGNED NULL,
         confidence            TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -425,8 +427,11 @@ _MIGRATIONS = (
     ("companies", "size_min", "ALTER TABLE companies ADD COLUMN size_min INT NULL"),
     ("companies", "size_max", "ALTER TABLE companies ADD COLUMN size_max INT NULL"),
     ("companies", "domain_checked", "ALTER TABLE companies ADD COLUMN domain_checked TINYINT(1) NOT NULL DEFAULT 0"),
+    ("companies", "roster_synced_at", "ALTER TABLE companies ADD COLUMN roster_synced_at DATETIME NULL"),
+    ("companies", "roster_count", "ALTER TABLE companies ADD COLUMN roster_count INT NOT NULL DEFAULT 0"),
 )
 _MIGRATION_INDEXES = (
+    ("companies", "idx_company_roster", "ALTER TABLE companies ADD KEY idx_company_roster (roster_synced_at)"),
     ("companies", "idx_company_country", "ALTER TABLE companies ADD KEY idx_company_country (country)"),
     ("candidates", "idx_cand_category", "ALTER TABLE candidates ADD KEY idx_cand_category (category)"),
     ("candidates", "idx_cand_country", "ALTER TABLE candidates ADD KEY idx_cand_country (location_country)"),
@@ -669,6 +674,36 @@ class CompanyRepo:
             conn.commit()
 
     @staticmethod
+    def roster_pending(limit: int = 5) -> List[dict]:
+        """Companies whose full employee roster hasn't been synced yet. Domain-having
+        companies first (precise search), then by how many candidates they already have."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name, root_domain, country, size_band, size_min, size_max, "
+                    "estimated_employees FROM companies WHERE roster_synced_at IS NULL "
+                    "ORDER BY (root_domain IS NOT NULL) DESC, "
+                    "(SELECT COUNT(*) FROM candidates c WHERE c.company_id=companies.id) DESC, "
+                    "id DESC LIMIT %s", (limit,))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def mark_roster_synced(company_id: int, count: int) -> None:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET roster_synced_at=NOW(), roster_count=%s, "
+                            "last_verified_at=NOW() WHERE id=%s", (int(count), company_id))
+            conn.commit()
+
+    @staticmethod
+    def reset_roster(company_id: int) -> None:
+        """Mark a company for re-roster (e.g., after a long interval)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET roster_synced_at=NULL WHERE id=%s", (company_id,))
+            conn.commit()
+
+    @staticmethod
     def all_id_name(limit: int = 5000) -> List[dict]:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -745,7 +780,8 @@ class CompanyRepo:
         wsql = " AND ".join(where)
         sort_map = {"quality": "company_quality_score DESC",
                     "employees": "estimated_employees DESC", "name": "name ASC",
-                    "recent": "last_verified_at DESC", "candidates": "candidate_count DESC"}
+                    "recent": "last_verified_at DESC", "candidates": "candidate_count DESC",
+                    "open": "open_count DESC, candidate_count DESC"}
         order = sort_map.get(filters.get("sort", "candidates"), "candidate_count DESC")
         with get_conn() as conn:
             with conn.cursor() as cur:

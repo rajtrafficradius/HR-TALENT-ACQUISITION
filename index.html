@@ -119,6 +119,12 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
   background:var(--amber);cursor:pointer;border:2px solid #1a1206;box-shadow:0 1px 4px rgba(0,0,0,.5)}
 .rangerow{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
 .rangerow .rv{font-family:var(--mono);font-size:12px;color:var(--amber);font-weight:500}
+.rv-input{font-family:var(--mono);font-size:12px;color:var(--amber);background:transparent;
+  border:1px solid var(--line);border-radius:4px;width:78px;text-align:right;padding:2px 6px;
+  -moz-appearance:textfield;transition:.14s}
+.rv-input::-webkit-outer-spin-button,.rv-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.rv-input:hover{border-color:var(--line2)}
+.rv-input:focus{outline:none;border-color:var(--amber);background:#0c0c0e}
 .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;
   padding:9px 11px;background:#0d0d10;border:1px solid var(--line);border-radius:7px;transition:.15s}
 .toggle:hover{border-color:var(--line2)}
@@ -534,7 +540,7 @@ function PeopleView({filters,setFilters,onPerson,refreshKey}){
 }
 
 /* ── Companies view ──────────────────────────────── */
-const CSORTS=[['candidates','Most candidates'],['quality','Quality'],['employees','Employees'],['name','Name A-Z'],['recent','Recent']];
+const CSORTS=[['open','Most open to shift'],['candidates','Most candidates'],['quality','Quality'],['employees','Employees'],['name','Name A-Z'],['recent','Recent']];
 function CompaniesView({onCompany,meta}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
   const [f,setF]=useState({sort:'candidates',q:'',country:'',category:'',size_band:'',min_employees:0,max_employees:100000,min_quality:0});
@@ -555,9 +561,11 @@ function CompaniesView({onCompany,meta}){
       <option value="">All categories</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><label>Company size</label><select className="inp sm" value={f.size_band} onChange={e=>setF({...f,size_band:e.target.value})}>
       <option value="">Any size</option>{sizes.map(b=><option key={b} value={b}>{b}{SIZE_RANGE[b]?` (${SIZE_RANGE[b]})`:''}</option>)}</select></div>
-    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min employees</label><span className="rv">{f.min_employees||'any'}</span></div>
+    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min employees</label>
+        <input className="rv-input" type="number" min="0" max="100000" title="Type a precise value" value={f.min_employees} onChange={e=>setF({...f,min_employees:Math.max(0,Math.min(100000,Math.round(+e.target.value)||0))})}/></div>
       <input className="range" type="range" min="0" max="100000" step="25" value={f.min_employees} onChange={e=>setF({...f,min_employees:+e.target.value})}/></div>
-    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Max employees</label><span className="rv">{f.max_employees>=100000?'100k+':(f.max_employees||0).toLocaleString()}</span></div>
+    <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Max employees</label>
+        <input className="rv-input" type="number" min="0" max="100000" title="Type a precise value" value={f.max_employees} onChange={e=>setF({...f,max_employees:Math.max(0,Math.min(100000,Math.round(+e.target.value)||0))})}/></div>
       <input className="range" type="range" min="25" max="100000" step="25" value={f.max_employees} onChange={e=>setF({...f,max_employees:+e.target.value})}/></div>
     <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min company quality</label><span className="rv">{f.min_quality||0}</span></div>
       <input className="range" type="range" min="0" max="100" value={f.min_quality} onChange={e=>setF({...f,min_quality:+e.target.value})}/></div>
