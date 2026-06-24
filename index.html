@@ -99,6 +99,10 @@ a{color:var(--amber);text-decoration:none}
 .kpi .v{font-family:var(--disp);font-weight:700;font-size:19px;line-height:1;color:var(--t1)}
 .kpi .v.am{color:var(--amber)}
 .kpi .l{font-family:var(--mono);font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t3);margin-top:3px}
+.kpi-btn{cursor:pointer;transition:.14s}
+.kpi-btn:hover{border-color:var(--line3);background:#131318}
+.kpi-btn.open:hover{border-color:var(--amber-dim)}
+.kpi-btn:active{transform:translateY(1px)}
 .iconbtn{width:36px;height:36px;border-radius:8px;border:1px solid var(--line2);background:var(--bg3);
   display:flex;align-items:center;justify-content:center;color:var(--t2);transition:.16s}
 .iconbtn:hover{color:var(--t1);border-color:var(--line3)}
@@ -379,7 +383,7 @@ function ScoreBlock({c}){
 
 /* ── Person drawer ───────────────────────────────── */
 function PersonDrawer({id,onClose,onChanged,toast}){
-  const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(false);
+  const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(false),[liBusy,setLiBusy]=useState(false);
   const load=useCallback(async()=>{const r=await api('/api/people/'+id); if(r.candidate)setD(r);},[id]);
   useEffect(()=>{setD(null);load();},[id,load]);
   const enrich=async()=>{setBusy(true);
@@ -388,6 +392,11 @@ function PersonDrawer({id,onClose,onChanged,toast}){
     if(r.__status===409&&r.error==='no_credits'){toast('Apollo credits exhausted — reveal unavailable','bad');}
     else if(r.ok){toast(r.cached?'Already enriched':'Enriched · contact revealed','ok');await load();onChanged&&onChanged();}
     else{toast('Enrichment failed','bad');await load();}};
+  const linkedinEnrich=async()=>{setLiBusy(true);
+    const r=await api('/api/linkedin-enrich/'+id,{method:'POST'});
+    setLiBusy(false);
+    if(r&&r.ok){toast(r.linkedin_fetched?'LinkedIn checked — intent confirmed':'LinkedIn limited (used available data)','ok');await load();onChanged&&onChanged();}
+    else toast('LinkedIn enrich failed','bad');};
   if(!d)return <div className="drawer"><div className="dhead"><div className="top"><div><h2>Loading…</h2></div>
     <button className="iconbtn" onClick={onClose}>✕</button></div></div>
     <div className="dbody"><div className="empty"><span className="spin"/></div></div></div>;
@@ -419,6 +428,29 @@ function PersonDrawer({id,onClose,onChanged,toast}){
             {enriched?'Evidence-based from employment history.':'Inferred from title, seniority & company signals. Enrich for evidence-based intent from real employment history.'}</p>}
         {ai.why&&<div className="blurb">{ai.why}</div>}</div>
 
+      {c.linkedin_enriched&&(()=>{const li=c.linkedin_signals_json||{};const a=li.assessment||{};return(
+        <div className="sect"><div className="sect-h">LinkedIn assessment &nbsp;<span className="src linkedin">LinkedIn ✓</span></div>
+          <div className="evid" style={{marginBottom:12}}>
+            <div className="ev"><div className="en">{a.intent_likelihood??'—'}</div><div className="ek">Shift likelihood</div></div>
+            <div className="ev"><div className="en" style={{fontSize:15}}>{a.open_to_work?'Likely':'Unclear'}</div><div className="ek">Open to work</div></div>
+            <div className="ev"><div className="en" style={{fontSize:14}}>{a.confidence||(a._source==='openai'?'AI':'data')}</div><div className="ek">Confidence</div></div></div>
+          {a.summary&&<div className="blurb" style={{fontStyle:'normal'}}>{a.summary}</div>}
+          <div className="sgrid" style={{marginTop:12}}>
+            <div className="kv"><span className="k">Profile</span><span className="v">{li.linkedin_url?<a href={li.linkedin_url} target="_blank" rel="noopener">open ↗</a>:'—'}</span></div>
+            <div className="kv"><span className="k">Fetched</span><span className="v">{li.fetched_ok?'public profile':'limited / walled'}</span></div>
+            <div className="kv"><span className="k">Source</span><span className="v">{a._source==='openai'?'AI + LinkedIn':'Apollo data'}</span></div>
+            <div className="kv"><span className="k">Recommendation</span><span className="v">{a.recommendation||'—'}</span></div></div>
+          {(a.signals&&a.signals.length)?<div style={{marginTop:11}}><div className="cell-sub">Intent signals</div>
+            <div className="chips">{a.signals.map((s,i)=><span key={i} className="chip mini">{s}</span>)}</div></div>:null}
+          {(a.skills&&a.skills.length)?<div style={{marginTop:9}}><div className="cell-sub">Skills</div>
+            <div className="chips">{a.skills.map((s,i)=><span key={i} className="chip mini">{s}</span>)}</div></div>:null}
+          {(a.experience&&a.experience.length)?<div style={{marginTop:11}}><div className="cell-sub">Experience</div>
+            <div className="timeline" style={{marginTop:8}}>{a.experience.slice(0,6).map((x,i)=><div key={i} className="tl-item">
+              <div className="tt">{x.title||'—'}</div><div className="to">{x.company||''}</div>
+              <div className="td">{(x.start||'?')+' — '+(x.end||'?')}</div></div>)}</div></div>:null}
+          {a.note&&<div style={{marginTop:9,fontFamily:'var(--mono)',fontSize:10.5,color:'var(--t4)'}}>ⓘ {a.note}</div>}
+        </div>);})()}
+
       <div className="sect"><div className="sect-h">Contact</div>
         <div className="contact-box">
           <div className="contact-row"><div className="ci">✉</div>
@@ -436,7 +468,13 @@ function PersonDrawer({id,onClose,onChanged,toast}){
             <button className="btn btn-primary btn-sm" disabled={busy||(!rE&&!rP)} onClick={enrich}>
               {busy?<span className="spin"/>:'⚡ Enrich via Apollo'}</button></div>}
           {enriched&&<div style={{marginTop:10,fontFamily:'var(--mono)',fontSize:10.5,color:'var(--t3)',letterSpacing:'.05em'}}>
-            ✓ ENRICHED {c.enriched_at?('· '+fmtDate(c.enriched_at)):''}</div>}
+            ✓ APOLLO ENRICHED {c.enriched_at?('· '+fmtDate(c.enriched_at)):''}</div>}
+          <div className="enrich-ctl" style={{marginTop:12,borderTop:'1px solid var(--line)',paddingTop:12}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12.5,color:c.linkedin_enriched?'var(--amber)':'var(--t2)'}}>{c.linkedin_enriched?'✓ LinkedIn checked':'Confirm job-change intent via LinkedIn'}</div>
+              <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--t4)',marginTop:2}}>searches the public profile + AI · free</div></div>
+            <button className="btn btn-sm" disabled={liBusy} onClick={linkedinEnrich}>
+              {liBusy?<span className="spin"/>:(c.linkedin_enriched?'↻ Re-check':'Enrich via LinkedIn')}</button></div>
         </div></div>
 
       {eh.length>0&&<div className="sect"><div className="sect-h">Employment history</div>
@@ -516,9 +554,8 @@ function PeopleView({filters,setFilters,onPerson,refreshKey}){
   useEffect(()=>{setPage(1);},[JSON.stringify(f)]);
   return <>
     <div className="mhead"><div className="count"><b>{data.total}</b> candidates</div><div className="spacer"/>
-      <span className="kicker">Sort</span>
-      <select className="inp sm" style={{width:170}} value={f.sort||'overall'} onChange={e=>setFilters({...f,sort:e.target.value})}>
-        {SORTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+      {f.open_to_shift?<span className="badge-open"><span className="pulse"/>Open to shift only</span>:null}
+      {(f.department||f.category||f.country||f.enrichment_status)?<span className="kicker">filtered</span>:null}</div>
     <div className="mscroll">
       {loading?<div className="empty"><span className="spin"/></div>:
        data.rows.length===0?<div className="empty"><div className="big">No candidates match</div>
@@ -532,8 +569,9 @@ function PeopleView({filters,setFilters,onPerson,refreshKey}){
         <Gauge label="Intent" value={c.job_change_intent_score}/>
         <div style={{display:'flex',flexDirection:'column',gap:7,alignItems:'flex-end'}}>
           <div className="scorebig"><span className="num" style={{fontSize:21,color:scoreColor(c.overall_candidate_score)}}>{c.overall_candidate_score}</span></div>
-          <div style={{display:'flex',gap:8,alignItems:'center'}}><Avail email={c.has_email||c.email} phone={c.has_phone||c.phone}/>
-            {c.enrichment_status==='enriched'?<span className="src history">✓</span>:null}</div></div>
+          <div style={{display:'flex',gap:6,alignItems:'center'}}><Avail email={c.has_email||c.email} phone={c.has_phone||c.phone}/>
+            {c.enrichment_status==='enriched'?<span className="src history" title="Apollo enriched">A✓</span>:null}
+            {c.linkedin_enriched?<span className="src linkedin" title="LinkedIn enriched">in</span>:null}</div></div>
       </div>)}</div>}
       {data.total_pages>1&&<Pager page={page} pages={data.total_pages} set={setPage}/>}
     </div></>;
@@ -622,11 +660,18 @@ function PeopleFilters({f,setF,meta}){
     <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min company score</label><span className="rv">{f.min_company_score||0}</span></div>
       <input className="range" type="range" min="0" max="100" value={f.min_company_score||0} onChange={e=>setF({...f,min_company_score:+e.target.value})}/></div>
     <div className="fgroup"><label>Enrichment</label><select className="inp sm" value={f.enrichment_status||''} onChange={e=>setF({...f,enrichment_status:e.target.value})}>
-      <option value="">Any status</option><option value="not_enriched">Not enriched</option><option value="enriched">Enriched</option></select></div>
+      <option value="">Any status</option>
+      <option value="not_enriched">Not enriched</option>
+      <option value="apollo">Apollo enriched</option>
+      <option value="linkedin">LinkedIn enriched</option>
+      <option value="both">Apollo + LinkedIn</option>
+      <option value="any_enriched">Any enriched</option></select></div>
     <div className="fgroup"><label>Freshness</label><select className="inp sm" value={f.freshness||''} onChange={e=>setF({...f,freshness:e.target.value})}>
       {FRESH.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
     <div className="fgroup"><div className="toggle" onClick={()=>setF({...f,open_to_shift:f.open_to_shift?'':'1'})}>
       <span className="tl">Open to shift only</span><span className={cls('sw',f.open_to_shift&&'on')}/></div></div>
+    <div className="fgroup"><label>Sort by</label><select className="inp sm" value={f.sort||'overall'} onChange={e=>setF({...f,sort:e.target.value})}>
+      {SORTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
     <button className="btn btn-ghost btn-block btn-sm" onClick={()=>setF({sort:f.sort})}>Reset filters</button>
   </div>;
 }
@@ -635,6 +680,7 @@ function PeopleFilters({f,setF,meta}){
 function DiscoveryView({onDone,toast,meta}){
   const groups=meta.groups||[];
   const [hunt,setHunt]=useState(null);
+  const [roster,setRoster]=useState(null);
   const [sel,setSel]=useState([]);              // selected group names for a manual run
   const [locs,setLocs]=useState(['India','Australia']),[locIn,setLocIn]=useState('');
   const [maxc,setMaxc]=useState(600),[seed,setSeed]=useState(false);
@@ -642,9 +688,13 @@ function DiscoveryView({onDone,toast,meta}){
   const cref=useRef(null), poll=useRef(null), hpoll=useRef(null), guard=useRef(0);
   useEffect(()=>{if(cref.current)cref.current.scrollTop=cref.current.scrollHeight;},[logs]);
   useEffect(()=>{if(groups.length&&!sel.length)setSel(groups.slice(0,2).map(g=>g.name));},[groups]);
+  const rguard=useRef(0);
   const loadHunt=useCallback(async()=>{const r=await api('/api/hunt');
     if(r&&r.total_categories!=null&&Date.now()>=guard.current)setHunt(r);},[]);  // don't clobber a recent toggle
-  useEffect(()=>{loadHunt();hpoll.current=setInterval(loadHunt,10000);return()=>{clearInterval(hpoll.current);if(poll.current)clearInterval(poll.current);};},[loadHunt]);
+  const loadRoster=useCallback(async()=>{const r=await api('/api/roster');
+    if(r&&r.companies_total!=null&&Date.now()>=rguard.current)setRoster(r);},[]);
+  useEffect(()=>{loadHunt();loadRoster();hpoll.current=setInterval(()=>{loadHunt();loadRoster();},10000);
+    return()=>{clearInterval(hpoll.current);if(poll.current)clearInterval(poll.current);};},[loadHunt,loadRoster]);
 
   const toggleHunt=async()=>{const next=!(hunt&&hunt.enabled);
     guard.current=Date.now()+3000;                          // ignore in-flight loadHunt for 3s
@@ -652,6 +702,12 @@ function DiscoveryView({onDone,toast,meta}){
     const r=await api('/api/hunt',{method:'POST',body:JSON.stringify({enabled:next})});
     if(r&&r.ok)setHunt(r); else setHunt(h=>({...(h||{}),enabled:!next}));
     toast(next?'Auto-hunt activated — continuously sourcing companies':'Auto-hunt paused', r&&r.ok?'ok':'bad');};
+  const toggleRoster=async()=>{const next=!(roster&&roster.enabled);
+    rguard.current=Date.now()+3000;
+    setRoster(h=>({...(h||{}),enabled:next}));
+    const r=await api('/api/roster',{method:'POST',body:JSON.stringify({enabled:next})});
+    if(r&&r.ok)setRoster(r); else setRoster(h=>({...(h||{}),enabled:!next}));
+    toast(next?'Roster verifier on — completing every company’s employee list':'Roster verifier paused', r&&r.ok?'ok':'bad');};
   const toggleG=n=>setSel(p=>p.includes(n)?p.filter(x=>x!==n):[...p,n]);
   const addLoc=e=>{if(e.key==='Enter'&&locIn.trim()){setLocs(p=>[...new Set([...p,locIn.trim()])]);setLocIn('');e.preventDefault();}};
   const start=async()=>{
@@ -671,6 +727,7 @@ function DiscoveryView({onDone,toast,meta}){
   const cancel=async()=>{if(job){await api('/api/cancel/'+job,{method:'POST'});setStat('Cancelling…');}};
   const running=state==='running';
   const hOn=hunt&&hunt.enabled;
+  const rOn=roster&&roster.enabled;
   return <div className="mscroll"><div className="disc">
     <h2>Discovery</h2>
     <p className="lede">Source job-change-ready talent from Apollo — free People Search, zero contact credits. Reveal email &amp; phone later, per candidate.</p>
@@ -691,6 +748,21 @@ function DiscoveryView({onDone,toast,meta}){
       <div className="hh-right">
         <div className={cls('bigsw',hOn&&'on')} onClick={toggleHunt}><div className="bigsw-k"/></div>
         <div className="bigsw-l">{hOn?'ON':'OFF'}</div></div>
+    </div>
+
+    <div className={cls('panel','hunt-hero',rOn&&'live')}>
+      <div className="hh-left">
+        <div className="kicker">Roster verifier</div>
+        <h3>Roster crawler {rOn?'is active':'is paused'} {rOn&&<span className="live-dot"/>}</h3>
+        <p>Walks every company in the database and adds any Apollo employees missing from it — so no company has just a few people. Free, runs in the background.</p>
+        {roster&&<div className="hh-meta">
+          <span><b>{(roster.companies_rostered||0).toLocaleString()}</b>/{(roster.companies_total||0).toLocaleString()} companies done</span>
+          <span><b>{(roster.people_rostered||0).toLocaleString()}</b> people in rosters</span>
+          <span>{(roster.companies_pending||0).toLocaleString()} pending</span></div>}
+      </div>
+      <div className="hh-right">
+        <div className={cls('bigsw',rOn&&'on')} onClick={toggleRoster}><div className="bigsw-k"/></div>
+        <div className="bigsw-l">{rOn?'ON':'OFF'}</div></div>
     </div>
 
     <div className="panel">
@@ -749,10 +821,14 @@ function App(){
         <button key={t} className={cls(tab===t&&'on')} onClick={()=>setTab(t)}>{t}</button>)}</div>
       <div className="spacer"/>
       <div className="kpis">
-        <div className="kpi"><div className="v">{stats.candidates_total??'—'}</div><div className="l">Candidates</div></div>
-        <div className="kpi"><div className="v am">{stats.open_to_shift??'—'}</div><div className="l">Open to shift</div></div>
-        <div className="kpi"><div className="v">{stats.enriched??'—'}</div><div className="l">Enriched</div></div>
-        <div className="kpi"><div className="v">{stats.companies_total??'—'}</div><div className="l">Companies</div></div></div>
+        <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf({sort:'intent',open_to_shift:'1'});}} title="View all candidates">
+          <div className="v">{stats.candidates_total??'—'}</div><div className="l">Candidates</div></div>
+        <div className="kpi kpi-btn open" onClick={()=>{setTab('people');setPf({sort:'intent',open_to_shift:'1'});}} title="Show only open-to-shift candidates">
+          <div className="v am">{stats.open_to_shift??'—'}</div><div className="l">Open to shift ▸</div></div>
+        <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf({sort:'overall',enrichment_status:'any_enriched'});}} title="Show enriched candidates">
+          <div className="v">{stats.enriched??'—'}</div><div className="l">Enriched</div></div>
+        <div className="kpi kpi-btn" onClick={()=>setTab('companies')} title="View companies">
+          <div className="v">{stats.companies_total??'—'}</div><div className="l">Companies</div></div></div>
       <button className="iconbtn" title="Log out" onClick={logout}>⏻</button>
     </div>
     {tab==='people'&&<div className="body"><PeopleFilters f={pf} setF={setPf} meta={meta}/>

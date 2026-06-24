@@ -1600,6 +1600,159 @@ def enrich_candidate(candidate_id: int, reveal_email: bool = True,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  LinkedIn enrichment — confirm job-change intent from the public profile
+#  (best-effort public fetch + OpenAI structuring grounded in REAL data).
+#  No LinkedIn API key yet → this is the active implementation of the reserved
+#  LinkedIn seam; swap fetch_linkedin_public() for a LinkedIn API later.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_LI_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+_li_limiter = RateLimiter(2.0)  # be gentle with LinkedIn
+
+
+def fetch_linkedin_public(url: str) -> dict:
+    """Best-effort fetch of a PUBLIC LinkedIn profile. Returns og: tags + JSON-LD when
+    available; flags a login wall. Never raises. (Datacenter IPs like Railway may be
+    walled — caller degrades to AI-over-Apollo-data.)"""
+    import html as _html
+    if not url or "/in/" not in url:
+        return {"_ok": False, "_reason": "no_profile_url"}
+    try:
+        _li_limiter.wait()
+        r = requests.get(url, headers={"User-Agent": _LI_UA, "Accept-Language": "en-US,en"},
+                         timeout=15, allow_redirects=True)
+    except Exception as e:
+        return {"_ok": False, "_reason": f"fetch_error:{e}"}
+    if "authwall" in (r.url or "").lower() or r.status_code in (999, 403, 451):
+        return {"_ok": False, "_reason": "login_wall", "_status": r.status_code}
+    if r.status_code != 200:
+        return {"_ok": False, "_reason": f"http_{r.status_code}"}
+    html_text = r.text
+
+    def _meta(prop):
+        m = re.search(r'<meta\s+property="' + re.escape(prop) + r'"\s+content="([^"]*)"', html_text)
+        return _html.unescape(m.group(1)) if m else None
+
+    ld = None
+    m = re.search(r'<script type="application/ld\+json">(.*?)</script>', html_text, re.S)
+    if m:
+        try:
+            ld = json.loads(m.group(1))
+        except Exception:
+            ld = None
+    return {"_ok": True, "og_title": _meta("og:title"), "og_description": _meta("og:description"),
+            "ld": ld}
+
+
+def _ld_person(ld) -> dict:
+    """Pull a Person object out of LinkedIn JSON-LD (which is usually a @graph list)."""
+    if not ld:
+        return {}
+    nodes = ld.get("@graph") if isinstance(ld, dict) else (ld if isinstance(ld, list) else [])
+    for n in (nodes or []):
+        if isinstance(n, dict) and "Person" in str(n.get("@type", "")):
+            return n
+    return ld if isinstance(ld, dict) else {}
+
+
+def openai_linkedin_assess(candidate: dict, fetched: dict) -> dict:
+    """Assess job-change intent + extract a concise profile from the REAL fetched
+    LinkedIn text + Apollo data. Uses ONLY provided data (no fabrication). Degrades to
+    a heuristic when OpenAI/key is unavailable."""
+    eh = candidate.get("employment_history_json") or []
+    hist = [{"title": h.get("title"), "company": h.get("organization_name"),
+             "start": h.get("start_date"), "end": ("present" if h.get("current") else h.get("end_date"))}
+            for h in eh if isinstance(h, dict)][:8]
+    person_ld = _ld_person(fetched.get("ld"))
+    li_text = " | ".join(filter(None, [fetched.get("og_title"), fetched.get("og_description")]))
+    walled = not fetched.get("_ok")
+
+    if not openai_available():
+        # heuristic fallback over real data
+        score, regime, sig = score_job_change_intent({
+            "employment_history": eh, "title": candidate.get("title", ""),
+            "headline": candidate.get("headline", "")})
+        return {"_source": "heuristic", "open_to_work": score >= 65,
+                "intent_likelihood": score, "summary": fetched.get("og_description") or candidate.get("headline"),
+                "signals": [f"intent regime: {regime}"], "experience": hist,
+                "linkedin_fetched": not walled,
+                "note": "OpenAI key absent — intent inferred from Apollo data."}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        payload = {
+            "name": candidate.get("full_name"), "current_title": candidate.get("title"),
+            "headline": candidate.get("headline"), "company": candidate.get("company_name"),
+            "apollo_employment_history": hist,
+            "linkedin_public_text": li_text or None,
+            "linkedin_jsonld": {k: person_ld.get(k) for k in
+                                ("jobTitle", "worksFor", "alumniOf", "description", "address")
+                                if person_ld.get(k)} or None,
+            "linkedin_login_walled": walled,
+        }
+        sysmsg = ("You are an HR analyst confirming a candidate's job-change intent from "
+                  "their LinkedIn + employment data. Use ONLY the provided data — NEVER invent "
+                  "experience, skills, education, or facts. If LinkedIn text is missing/walled, "
+                  "base intent on the Apollo employment history and say so. Output STRICT JSON: "
+                  '{"open_to_work":bool,"intent_likelihood":0-100,"confidence":"low|medium|high",'
+                  '"summary":"<=40 words, only from provided data","signals":["short factual signals"],'
+                  '"experience":[{"title":..,"company":..,"start":..,"end":..}],'
+                  '"skills":["only if explicitly present, else empty"],'
+                  '"recommendation":"<=20 words for the recruiter"}')
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0.2, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": sysmsg},
+                      {"role": "user", "content": json.dumps(payload, default=str)}], timeout=45)
+        out = json.loads(resp.choices[0].message.content)
+        out["_source"] = "openai"
+        out["linkedin_fetched"] = not walled
+        if not out.get("experience"):
+            out["experience"] = hist
+        return out
+    except Exception as e:
+        score, regime, _ = score_job_change_intent({"employment_history": eh,
+                                                     "title": candidate.get("title", ""),
+                                                     "headline": candidate.get("headline", "")})
+        note = ("OpenAI key invalid/unreachable — intent from Apollo employment history; "
+                "set a valid OPENAI_API_KEY for AI profile structuring.") \
+            if "401" in str(e) or "api_key" in str(e).lower() else str(e)[:160]
+        return {"_source": "heuristic", "open_to_work": score >= 65, "intent_likelihood": score,
+                "summary": fetched.get("og_description") or candidate.get("headline"),
+                "signals": [f"intent regime: {regime}"], "experience": hist,
+                "linkedin_fetched": not walled, "note": note}
+
+
+def enrich_linkedin(candidate_id: int) -> dict:
+    """The 'Enrich via LinkedIn' action: confirm intent + capture a concise profile,
+    store it, and recompute intent with source='linkedin'. FREE (no Apollo credits)."""
+    row = db.CandidateRepo.get(candidate_id)
+    if not row:
+        return {"ok": False, "error": "not_found"}
+    url = row.get("linkedin_url")
+    fetched = fetch_linkedin_public(url) if url else {"_ok": False, "_reason": "no_url"}
+    assess = openai_linkedin_assess(row, fetched)
+
+    intent = assess.get("intent_likelihood")
+    intent = clamp(intent) if isinstance(intent, (int, float)) else int(row.get("job_change_intent_score") or 50)
+    overall = score_overall({"role_fit": row.get("role_fit_score", 50), "intent": intent,
+                             "technical": row.get("technical_score", 50),
+                             "company_quality": row.get("company_quality_score", 50),
+                             "freshness": row.get("freshness_score", 100)})
+    signals = {"checked_at": now_utc().isoformat(), "linkedin_url": url,
+               "fetched_ok": bool(fetched.get("_ok")), "fetch_reason": fetched.get("_reason"),
+               "og_title": fetched.get("og_title"), "og_description": fetched.get("og_description"),
+               "assessment": assess}
+    scores_json = {**(row.get("scores_json") or {}), "intent": intent, "overall": overall,
+                   "intent_regime": "linkedin", "linkedin": assess}
+    db.CandidateRepo.apply_linkedin(candidate_id, open_to_work=assess.get("open_to_work"),
+                                    signals=signals, intent_score=intent,
+                                    scores_json=scores_json, overall=overall)
+    return {"ok": True, "candidate": db.CandidateRepo.get(candidate_id), "assessment": assess,
+            "linkedin_fetched": bool(fetched.get("_ok"))}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Daily auto-refresh scheduler
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1614,6 +1767,28 @@ def set_auto_hunt(on: bool) -> None:
     db.SettingsRepo.set("auto_hunt", "1" if on else "0")
     if on:
         db.SettingsRepo.set("hunt_started_at", now_utc().isoformat())
+
+
+# ── Roster verifier (separate toggle): for every company, ensure every Apollo
+#    employee is in the DB. Gated so the user controls this heavy free crawl. ──────
+def roster_verify_enabled() -> bool:
+    return db.SettingsRepo.get_bool("roster_verify", _env("HR_ROSTER_VERIFY_DEFAULT", "0") == "1")
+
+
+def set_roster_verify(on: bool) -> None:
+    db.SettingsRepo.set("roster_verify", "1" if on else "0")
+    if on:
+        db.SettingsRepo.set("roster_started_at", now_utc().isoformat())
+
+
+def roster_status() -> dict:
+    s = db.SettingsRepo.get_many(["roster_verify", "roster_started_at", "roster_last_at"])
+    counts = db.CompanyRepo.roster_counts()
+    rv = s.get("roster_verify")
+    enabled = (rv in ("1", "true", "True", "on")) if rv is not None \
+        else (_env("HR_ROSTER_VERIFY_DEFAULT", "0") == "1")
+    return {"enabled": enabled, "last_at": s.get("roster_last_at"),
+            "started_at": s.get("roster_started_at"), **counts}
 
 
 def hunt_status() -> dict:
@@ -1689,13 +1864,16 @@ def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
             except Exception as e:
                 log.warning("domain backfill error: %s", e)
 
-            # Progressively pull each company's FULL employee roster (free), paced.
-            try:
-                added, n = roster_sync_batch(_env_int("HUNT_ROSTER_PER_TICK", 4))
-                if added:
-                    log.info("roster sync: +%d people across %d companies", added, n)
-            except Exception as e:
-                log.warning("roster sync error: %s", e)
+            # Roster verifier (separate toggle): pull each company's FULL employee
+            # roster from Apollo so none are missing. Only when the user enables it.
+            if roster_verify_enabled():
+                try:
+                    added, n = roster_sync_batch(_env_int("HUNT_ROSTER_PER_TICK", 4))
+                    db.SettingsRepo.set("roster_last_at", now_utc().isoformat())
+                    if added:
+                        log.info("roster verify: +%d people across %d companies", added, n)
+                except Exception as e:
+                    log.warning("roster sync error: %s", e)
 
             if not auto_hunt_enabled():
                 continue

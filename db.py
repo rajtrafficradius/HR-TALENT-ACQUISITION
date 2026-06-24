@@ -349,6 +349,7 @@ _SCHEMA_SQL: Sequence[str] = (
         enriched_at             DATETIME NULL,
         open_to_shift           TINYINT(1) NOT NULL DEFAULT 0,
         intent_source           ENUM('heuristic','history','linkedin') NOT NULL DEFAULT 'heuristic',
+        linkedin_enriched       TINYINT(1) NOT NULL DEFAULT 0,
         linkedin_open_to_work   TINYINT(1) NULL,
         linkedin_signals_json   JSON NULL,
         linkedin_checked_at     DATETIME NULL,
@@ -429,9 +430,11 @@ _MIGRATIONS = (
     ("companies", "domain_checked", "ALTER TABLE companies ADD COLUMN domain_checked TINYINT(1) NOT NULL DEFAULT 0"),
     ("companies", "roster_synced_at", "ALTER TABLE companies ADD COLUMN roster_synced_at DATETIME NULL"),
     ("companies", "roster_count", "ALTER TABLE companies ADD COLUMN roster_count INT NOT NULL DEFAULT 0"),
+    ("candidates", "linkedin_enriched", "ALTER TABLE candidates ADD COLUMN linkedin_enriched TINYINT(1) NOT NULL DEFAULT 0"),
 )
 _MIGRATION_INDEXES = (
     ("companies", "idx_company_roster", "ALTER TABLE companies ADD KEY idx_company_roster (roster_synced_at)"),
+    ("candidates", "idx_cand_li", "ALTER TABLE candidates ADD KEY idx_cand_li (linkedin_enriched)"),
     ("companies", "idx_company_country", "ALTER TABLE companies ADD KEY idx_company_country (country)"),
     ("candidates", "idx_cand_category", "ALTER TABLE candidates ADD KEY idx_cand_category (category)"),
     ("candidates", "idx_cand_country", "ALTER TABLE candidates ADD KEY idx_cand_country (location_country)"),
@@ -688,6 +691,18 @@ class CompanyRepo:
                 return list(cur.fetchall() or [])
 
     @staticmethod
+    def roster_counts() -> dict:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) c FROM companies"); total = int(cur.fetchone()["c"])
+                cur.execute("SELECT COUNT(*) c FROM companies WHERE roster_synced_at IS NOT NULL")
+                done = int(cur.fetchone()["c"])
+                cur.execute("SELECT COALESCE(SUM(roster_count),0) s FROM companies")
+                people = int(cur.fetchone()["s"])
+        return {"companies_total": total, "companies_rostered": done,
+                "companies_pending": total - done, "people_rostered": people}
+
+    @staticmethod
     def mark_roster_synced(company_id: int, count: int) -> None:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -830,7 +845,7 @@ class CandidateRepo:
         "id, apollo_person_id, full_name, title, department, category, seniority, company_id, "
         "company_name, company_domain, has_email, has_phone, technical_score, role_fit_score, "
         "job_change_intent_score, company_quality_score, freshness_score, "
-        "overall_candidate_score, enrichment_status, open_to_shift, intent_source, "
+        "overall_candidate_score, enrichment_status, linkedin_enriched, open_to_shift, intent_source, "
         "email, phone, linkedin_url, location_city, location_country, "
         "discovered_at, last_verified_at, enriched_at")
 
@@ -931,8 +946,19 @@ class CandidateRepo:
             where.append("seniority=%s"); params.append(filters["seniority"])
         if filters.get("company_id"):
             where.append("company_id=%s"); params.append(int(filters["company_id"]))
-        if filters.get("enrichment_status"):
-            where.append("enrichment_status=%s"); params.append(filters["enrichment_status"])
+        es = filters.get("enrichment_status")
+        if es == "apollo":
+            where.append("enrichment_status='enriched'")
+        elif es == "linkedin":
+            where.append("linkedin_enriched=1")
+        elif es == "both":
+            where.append("enrichment_status='enriched' AND linkedin_enriched=1")
+        elif es == "any_enriched":
+            where.append("(enrichment_status='enriched' OR linkedin_enriched=1)")
+        elif es == "not_enriched":
+            where.append("enrichment_status<>'enriched' AND linkedin_enriched=0")
+        elif es:
+            where.append("enrichment_status=%s"); params.append(es)
         if filters.get("min_overall"):
             where.append("overall_candidate_score>=%s"); params.append(int(filters["min_overall"]))
         if filters.get("min_intent"):
@@ -984,6 +1010,31 @@ class CandidateRepo:
                 acquired = (cur.rowcount == 1)
             conn.commit()
         return acquired
+
+    @staticmethod
+    def apply_linkedin(candidate_id: int, *, open_to_work: Optional[bool],
+                       signals: Optional[dict], intent_score: Optional[int],
+                       scores_json: Optional[dict], overall: Optional[int]) -> None:
+        sets = ["linkedin_enriched=1", "linkedin_checked_at=NOW()", "intent_source='linkedin'"]
+        params: list = []
+        if open_to_work is not None:
+            sets.append("linkedin_open_to_work=%s"); params.append(1 if open_to_work else 0)
+        if signals is not None:
+            sets.append("linkedin_signals_json=%s"); params.append(_dumps(signals))
+        if intent_score is not None:
+            sets.append("job_change_intent_score=%s"); params.append(int(intent_score))
+        if scores_json is not None:
+            sets.append("scores_json=%s"); params.append(_dumps(scores_json))
+        if overall is not None:
+            sets.append("overall_candidate_score=%s"); params.append(int(overall))
+        if intent_score is not None:
+            sets.append("open_to_shift=IF(%s>=%s,1,0)")
+            params += [int(intent_score), int(os.environ.get("HR_INTENT_OPEN_THRESHOLD", "60"))]
+        params.append(candidate_id)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE candidates SET {', '.join(sets)} WHERE id=%s", params)
+            conn.commit()
 
     @staticmethod
     def set_status(candidate_id: int, status: str) -> None:

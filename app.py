@@ -460,6 +460,35 @@ def api_hunt_toggle():
     return jsonify({"ok": True, **core.hunt_status()})
 
 
+@app.post("/api/linkedin-enrich/<int:cid>")
+@require_auth
+def api_linkedin_enrich(cid):
+    """Confirm job-change intent + capture a concise profile from the candidate's
+    public LinkedIn (best-effort) + AI. FREE — no Apollo credits."""
+    if (r := _require_db()):
+        return r
+    res = core.enrich_linkedin(cid)
+    if not res.get("ok"):
+        return jsonify(res), (404 if res.get("error") == "not_found" else 400)
+    return jsonify(res)
+
+
+@app.get("/api/roster")
+@require_auth
+def api_roster_status():
+    return jsonify(core.roster_status())
+
+
+@app.post("/api/roster")
+@require_auth
+def api_roster_toggle():
+    """Master toggle for the roster verifier — when ON, the scheduler walks every
+    company and adds any Apollo employees missing from the DB (free)."""
+    data = request.get_json(silent=True) or {}
+    core.set_roster_verify(bool(data.get("enabled")))
+    return jsonify({"ok": True, **core.roster_status()})
+
+
 @app.get("/api/runs")
 @require_auth
 def api_runs():
