@@ -146,7 +146,12 @@ def init_pool(size: int = 12) -> None:
                 creator=pymysql, maxconnections=size, mincached=2, maxcached=4,
                 blocking=True, ping=4, host=cfg.host, port=cfg.port, user=cfg.user,
                 password=cfg.password, database=cfg.database, charset="utf8mb4",
-                autocommit=False, connect_timeout=12, read_timeout=40,
+                # autocommit=True is REQUIRED: with autocommit=False + MySQL's default
+                # REPEATABLE READ, a pooled connection that ran a SELECT keeps a stale
+                # snapshot and won't see commits from other pooled connections — causing
+                # stale reads right after a write. autocommit gives every statement its
+                # own transaction (no multi-statement atomicity is needed here).
+                autocommit=True, connect_timeout=12, read_timeout=40,
                 write_timeout=40, cursorclass=DictCursor)
             with _pool.connection() as probe:
                 with probe.cursor() as cur:
@@ -279,6 +284,7 @@ _SCHEMA_SQL: Sequence[str] = (
         founded_year          SMALLINT NULL,
         hq_city               VARCHAR(128) NULL,
         hq_country            VARCHAR(64) NULL,
+        country               VARCHAR(64) NULL,
         company_quality_score TINYINT UNSIGNED NOT NULL DEFAULT 0,
         enriched              TINYINT(1) NOT NULL DEFAULT 0,
         source                ENUM('apollo','seed','g2','clutch','manual') NOT NULL DEFAULT 'apollo',
@@ -292,6 +298,7 @@ _SCHEMA_SQL: Sequence[str] = (
         KEY idx_company_apollo (apollo_org_id),
         KEY idx_company_domain (root_domain),
         KEY idx_company_quality (company_quality_score),
+        KEY idx_company_country (country),
         KEY idx_company_industry (industry)
     ) {_TBL}
     """,
@@ -309,6 +316,7 @@ _SCHEMA_SQL: Sequence[str] = (
         title                   VARCHAR(255) NULL,
         headline                VARCHAR(512) NULL,
         department              ENUM('sales','marketing','seo','digital_marketing','other') NOT NULL DEFAULT 'other',
+        category                VARCHAR(64) NULL,
         departments_json        JSON NULL,
         seniority               VARCHAR(64) NULL,
         linkedin_url            VARCHAR(512) NULL,
@@ -345,6 +353,8 @@ _SCHEMA_SQL: Sequence[str] = (
         UNIQUE KEY uk_candidate_apollo (apollo_person_id),
         KEY idx_cand_company (company_id),
         KEY idx_cand_department (department),
+        KEY idx_cand_category (category),
+        KEY idx_cand_country (location_country),
         KEY idx_cand_overall (overall_candidate_score),
         KEY idx_cand_intent (job_change_intent_score),
         KEY idx_cand_enrich (enrichment_status),
@@ -388,17 +398,65 @@ _SCHEMA_SQL: Sequence[str] = (
         PRIMARY KEY (day)
     ) {_TBL}
     """,
+    # 6) app_settings — small key/value store (auto-hunt toggle, hunt cursor, ...)
+    f"""
+    CREATE TABLE IF NOT EXISTS app_settings (
+        k          VARCHAR(64) NOT NULL,
+        v          TEXT NULL,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (k)
+    ) {_TBL}
+    """,
+)
+
+# Columns added after v1 — applied to already-existing tables by migrate().
+# (table, column, ALTER ddl). Idempotent: only run when the column is absent.
+_MIGRATIONS = (
+    ("companies", "country", "ALTER TABLE companies ADD COLUMN country VARCHAR(64) NULL"),
+    ("candidates", "category", "ALTER TABLE candidates ADD COLUMN category VARCHAR(64) NULL"),
+)
+_MIGRATION_INDEXES = (
+    ("companies", "idx_company_country", "ALTER TABLE companies ADD KEY idx_company_country (country)"),
+    ("candidates", "idx_cand_category", "ALTER TABLE candidates ADD KEY idx_cand_category (category)"),
+    ("candidates", "idx_cand_country", "ALTER TABLE candidates ADD KEY idx_cand_country (location_country)"),
 )
 
 
+def migrate() -> None:
+    """Add post-v1 columns/indexes to already-existing tables. Idempotent."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DATABASE() AS d")
+            schema = cur.fetchone()["d"]
+            for table, col, ddl in _MIGRATIONS:
+                cur.execute("SELECT COUNT(*) AS c FROM information_schema.columns "
+                            "WHERE table_schema=%s AND table_name=%s AND column_name=%s",
+                            (schema, table, col))
+                if cur.fetchone()["c"] == 0:
+                    cur.execute(ddl)
+                    log.info("migrate: added %s.%s", table, col)
+            for table, idx, ddl in _MIGRATION_INDEXES:
+                cur.execute("SELECT COUNT(*) AS c FROM information_schema.statistics "
+                            "WHERE table_schema=%s AND table_name=%s AND index_name=%s",
+                            (schema, table, idx))
+                if cur.fetchone()["c"] == 0:
+                    try:
+                        cur.execute(ddl)
+                        log.info("migrate: added index %s", idx)
+                    except Exception as e:
+                        log.warning("migrate index %s skipped: %s", idx, e)
+        conn.commit()
+
+
 def init_schema() -> None:
-    """Create all tables if absent (FK-safe order). Idempotent."""
+    """Create all tables if absent (FK-safe order), then apply migrations. Idempotent."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             for stmt in _SCHEMA_SQL:
                 cur.execute(stmt)
         conn.commit()
-    log.info("Schema verified (5 tables).")
+    migrate()
+    log.info("Schema verified (6 tables).")
 
 
 def drop_all() -> None:
@@ -406,7 +464,8 @@ def drop_all() -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SET FOREIGN_KEY_CHECKS=0")
-            for t in ("enrichment_log", "candidates", "companies", "runs", "reveal_counter"):
+            for t in ("enrichment_log", "candidates", "companies", "runs", "reveal_counter",
+                      "app_settings"):
                 cur.execute(f"DROP TABLE IF EXISTS {t}")
             cur.execute("SET FOREIGN_KEY_CHECKS=1")
         conn.commit()
@@ -517,14 +576,14 @@ class CompanyRepo:
             (c.get("name") or "")[:255], c.get("root_domain"), c.get("website_url"),
             c.get("linkedin_url"), c.get("industry"), c.get("estimated_employees"),
             c.get("annual_revenue"), c.get("founded_year"), c.get("hq_city"),
-            c.get("hq_country"), int(c.get("company_quality_score") or 0),
+            c.get("hq_country"), c.get("country"), int(c.get("company_quality_score") or 0),
             c.get("source", "apollo"), run_id, int(c.get("confidence") or 0),
             _dumps(c.get("payload_json")))
         sql = (
             "INSERT INTO companies (company_key,apollo_org_id,name,root_domain,website_url,"
             "linkedin_url,industry,estimated_employees,annual_revenue,founded_year,hq_city,"
-            "hq_country,company_quality_score,source,run_id,confidence,payload_json) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "hq_country,country,company_quality_score,source,run_id,confidence,payload_json) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             "ON DUPLICATE KEY UPDATE name=VALUES(name),"
             "apollo_org_id=COALESCE(VALUES(apollo_org_id),apollo_org_id),"
             "root_domain=COALESCE(VALUES(root_domain),root_domain),"
@@ -536,6 +595,7 @@ class CompanyRepo:
             "founded_year=COALESCE(VALUES(founded_year),founded_year),"
             "hq_city=COALESCE(VALUES(hq_city),hq_city),"
             "hq_country=COALESCE(VALUES(hq_country),hq_country),"
+            "country=COALESCE(VALUES(country),country),"
             "company_quality_score=GREATEST(company_quality_score,VALUES(company_quality_score)),"
             "last_verified_at=NOW(),id=LAST_INSERT_ID(id)")
         with get_conn() as conn:
@@ -559,13 +619,13 @@ class CompanyRepo:
                     "estimated_employees=COALESCE(%s,estimated_employees),"
                     "annual_revenue=COALESCE(%s,annual_revenue),"
                     "founded_year=COALESCE(%s,founded_year),hq_city=COALESCE(%s,hq_city),"
-                    "hq_country=COALESCE(%s,hq_country),company_quality_score=%s,"
-                    "enriched=1,last_verified_at=NOW() WHERE id=%s",
+                    "hq_country=COALESCE(%s,hq_country),country=COALESCE(country,%s),"
+                    "company_quality_score=%s,enriched=1,last_verified_at=NOW() WHERE id=%s",
                     (org.get("apollo_org_id"), org.get("root_domain"), org.get("website_url"),
                      org.get("linkedin_url"), org.get("industry"),
                      org.get("estimated_employees"), org.get("annual_revenue"),
                      org.get("founded_year"), org.get("hq_city"), org.get("hq_country"),
-                     int(quality), company_id))
+                     org.get("hq_country"), int(quality), company_id))
             conn.commit()
 
     @staticmethod
@@ -588,13 +648,21 @@ class CompanyRepo:
     def list_page(filters: dict, page: int = 1, page_size: int = 50) -> Tuple[List[dict], int]:
         page, page_size, off = _page_bounds(page, page_size)
         where, params = ["1=1"], []
-        if filters.get("industry"):
-            where.append("industry=%s"); params.append(filters["industry"])
         if filters.get("min_quality"):
             where.append("company_quality_score>=%s"); params.append(int(filters["min_quality"]))
         if filters.get("q"):
             where.append("(name LIKE %s OR root_domain LIKE %s)")
             like = f"%{filters['q']}%"; params += [like, like]
+        # Country tab: company's own country OR any of its candidates' country.
+        if filters.get("country"):
+            where.append("(country=%s OR EXISTS (SELECT 1 FROM candidates c "
+                         "WHERE c.company_id=companies.id AND c.location_country=%s))")
+            params += [filters["country"], filters["country"]]
+        # Category (the 28-item taxonomy): company has a candidate of that category.
+        if filters.get("category"):
+            where.append("EXISTS (SELECT 1 FROM candidates c "
+                         "WHERE c.company_id=companies.id AND c.category=%s)")
+            params.append(filters["category"])
         wsql = " AND ".join(where)
         sort_map = {"quality": "company_quality_score DESC",
                     "employees": "estimated_employees DESC", "name": "name ASC",
@@ -607,7 +675,7 @@ class CompanyRepo:
                 cur.execute(
                     "SELECT id, name, company_key, root_domain, website_url, linkedin_url, "
                     "industry, estimated_employees, annual_revenue, founded_year, hq_country, "
-                    "company_quality_score, enriched, source, discovered_at, last_verified_at, "
+                    "country, company_quality_score, enriched, source, discovered_at, last_verified_at, "
                     "(SELECT COUNT(*) FROM candidates c WHERE c.company_id=companies.id) "
                     "AS candidate_count, "
                     "(SELECT COUNT(*) FROM candidates c WHERE c.company_id=companies.id "
@@ -616,6 +684,21 @@ class CompanyRepo:
                     params + [page_size, off])
                 rows = list(cur.fetchall() or [])
         return rows, total
+
+    @staticmethod
+    def country_counts() -> dict:
+        """Company counts per country (for the country tabs)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS c FROM companies")
+                total = int(cur.fetchone()["c"])
+                out = {"All": total}
+                for ctry in ("India", "Australia"):
+                    cur.execute("SELECT COUNT(*) AS c FROM companies WHERE country=%s OR EXISTS "
+                                "(SELECT 1 FROM candidates c WHERE c.company_id=companies.id "
+                                "AND c.location_country=%s)", (ctry, ctry))
+                    out[ctry] = int(cur.fetchone()["c"])
+        return out
 
     @staticmethod
     def distinct_industries() -> List[str]:
@@ -628,7 +711,7 @@ class CompanyRepo:
 
 class CandidateRepo:
     _LIST_COLS = (
-        "id, apollo_person_id, full_name, title, department, seniority, company_id, "
+        "id, apollo_person_id, full_name, title, department, category, seniority, company_id, "
         "company_name, company_domain, has_email, has_phone, technical_score, role_fit_score, "
         "job_change_intent_score, company_quality_score, freshness_score, "
         "overall_candidate_score, enrichment_status, open_to_shift, intent_source, "
@@ -645,6 +728,7 @@ class CandidateRepo:
             (c.get("full_name") or "Unknown")[:255], (c.get("first_name") or None),
             (c.get("last_name") or None), (c.get("title") or None),
             (c.get("headline") or None), c.get("department", "other"),
+            (c.get("category") or None),
             _dumps(c.get("departments_json")), (c.get("seniority") or None),
             (c.get("linkedin_url") or None), (c.get("photo_url") or None),
             (c.get("location_city") or None), (c.get("location_country") or None),
@@ -659,20 +743,21 @@ class CandidateRepo:
         threshold = int(os.environ.get("HR_INTENT_OPEN_THRESHOLD", "60"))
         sql = (
             "INSERT INTO candidates (apollo_person_id,company_id,company_name,company_domain,"
-            "full_name,first_name,last_name,title,headline,department,departments_json,seniority,"
+            "full_name,first_name,last_name,title,headline,department,category,departments_json,seniority,"
             "linkedin_url,photo_url,location_city,location_country,has_email,has_phone,"
             "technical_score,role_fit_score,job_change_intent_score,company_quality_score,"
             "freshness_score,overall_candidate_score,scores_json,ai_meta_json,open_to_shift,"
             "intent_source,run_id,confidence,payload_json) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-            "%s,%s,%s,%s,%s,%s,%s) "
+            "%s,%s,%s,%s,%s,%s,%s,%s) "
             "ON DUPLICATE KEY UPDATE "
             "company_id=COALESCE(VALUES(company_id),company_id),"
             "company_name=COALESCE(VALUES(company_name),company_name),"
             "company_domain=COALESCE(VALUES(company_domain),company_domain),"
             "full_name=VALUES(full_name),first_name=VALUES(first_name),last_name=VALUES(last_name),"
             "title=VALUES(title),headline=COALESCE(VALUES(headline),headline),"
-            "department=VALUES(department),departments_json=COALESCE(VALUES(departments_json),departments_json),"
+            "department=VALUES(department),category=COALESCE(VALUES(category),category),"
+            "departments_json=COALESCE(VALUES(departments_json),departments_json),"
             "seniority=COALESCE(VALUES(seniority),seniority),"
             "linkedin_url=COALESCE(VALUES(linkedin_url),linkedin_url),"
             "photo_url=COALESCE(VALUES(photo_url),photo_url),"
@@ -722,6 +807,10 @@ class CandidateRepo:
         where, params = ["1=1"], []
         if filters.get("department"):
             where.append("department=%s"); params.append(filters["department"])
+        if filters.get("category"):
+            where.append("category=%s"); params.append(filters["category"])
+        if filters.get("country"):
+            where.append("location_country=%s"); params.append(filters["country"])
         if filters.get("seniority"):
             where.append("seniority=%s"); params.append(filters["seniority"])
         if filters.get("company_id"):
@@ -858,6 +947,14 @@ class CandidateRepo:
                 return [r["seniority"] for r in (cur.fetchall() or [])]
 
     @staticmethod
+    def distinct_categories() -> List[str]:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT DISTINCT category FROM candidates "
+                            "WHERE category IS NOT NULL AND category<>'' ORDER BY category")
+                return [r["category"] for r in (cur.fetchall() or [])]
+
+    @staticmethod
     def companies_for_filter(limit: int = 500) -> List[dict]:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -943,3 +1040,49 @@ class StatsRepo:
                 out["last_run_at"] = last["started_at"] if last else None
                 out["last_run_state"] = last["state"] if last else None
         return out
+
+
+class SettingsRepo:
+    """Tiny key/value store (auto-hunt toggle, hunt cursor, counters)."""
+
+    @staticmethod
+    def get(key: str, default: Optional[str] = None) -> Optional[str]:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT v FROM app_settings WHERE k=%s", (key,))
+                row = cur.fetchone()
+        return row["v"] if row else default
+
+    @staticmethod
+    def get_many(keys) -> Dict[str, Optional[str]]:
+        """Read several settings in ONE round-trip (avoids per-key proxy latency)."""
+        keys = list(keys)
+        if not keys:
+            return {}
+        ph = ",".join(["%s"] * len(keys))
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT k, v FROM app_settings WHERE k IN ({ph})", keys)
+                rows = cur.fetchall() or []
+        return {r["k"]: r["v"] for r in rows}
+
+    @staticmethod
+    def set(key: str, value: Optional[str]) -> None:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO app_settings (k,v) VALUES (%s,%s) "
+                            "ON DUPLICATE KEY UPDATE v=VALUES(v)", (key, value))
+            conn.commit()
+
+    @staticmethod
+    def get_bool(key: str, default: bool = False) -> bool:
+        v = SettingsRepo.get(key)
+        return default if v is None else v in ("1", "true", "True", "on")
+
+    @staticmethod
+    def get_int(key: str, default: int = 0) -> int:
+        v = SettingsRepo.get(key)
+        try:
+            return int(v) if v is not None else default
+        except (ValueError, TypeError):
+            return default

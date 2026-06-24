@@ -22,9 +22,17 @@ index.html  React 18 + Babel SPA (no build step) — industrial black/white them
 ## How it works
 
 1. **Discovery (free).** A run pages Apollo `POST /mixed_people/api_search` across a
-   matrix of `{role family} × {seniority group}` for your chosen regions. It stores
-   each person and their company. **No contact credits are spent.** The daily
-   scheduler does this automatically once per day.
+   matrix of `{category} × {seniority} × {region}` (28 categories in 6 groups, e.g.
+   SEO, Paid Media/PPC, Web Development, Talent Acquisition…). It stores each person
+   and their company, classified by **category** and **region**. **No contact credits
+   are spent.**
+   - **Auto-hunt** (the Discovery master toggle): when ON, a background engine
+     continuously rotates the whole 28-category taxonomy across your regions, storing
+     new companies & candidates around the clock — still 100% free. Toggle it off any
+     time; the state persists in the database.
+   - **People View** filters by category, region, department, seniority, scores,
+     enrichment and freshness. **Company View** has **All / India / Australia** tabs
+     and a **category** filter (a company matches a category if any of its people do).
 2. **Scoring.** Every candidate gets six deterministic scores (0–100):
    `technical`, `role_fit`, `job_change_intent`, `company_quality`, `freshness`,
    and a weighted `overall`. Sort/filter by any of them.
@@ -111,4 +119,5 @@ will light up with **no schema change and no front-end work**.
 | POST | `/api/enrich/<id>` | Apollo reveal (costs credits, capped) |
 | GET | `/api/credits` | Apollo credit balance |
 | POST | `/api/discover`, GET `/api/status/<job>`, POST `/api/cancel/<job>` | run a sweep |
+| GET/POST | `/api/hunt` | read / toggle the auto-hunt engine |
 | GET | `/api/runs` | run history |

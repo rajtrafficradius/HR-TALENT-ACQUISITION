@@ -409,6 +409,119 @@ def classify_department(title: str = "", headline: str = "", departments: Option
     return "other"
 
 
+# ── Fine-grained category taxonomy (28 categories in 6 groups) ───────────────
+# Each: label, dept (coarse enum), group (UI), kw (q_keywords), titles[] (Apollo
+# person_titles), match[] (classification tokens). ORDER = specific → general so
+# classify_category() returns the most specific match first.
+CATEGORIES = [
+    {"label": "Technical SEO", "dept": "seo", "group": "SEO", "kw": "technical SEO",
+     "titles": ["Technical SEO Specialist", "Technical SEO Manager", "SEO Developer"],
+     "match": ["technical seo"]},
+    {"label": "Local SEO", "dept": "seo", "group": "SEO", "kw": "local SEO",
+     "titles": ["Local SEO Specialist", "Local SEO Manager"], "match": ["local seo"]},
+    {"label": "Link Building and Digital PR", "dept": "seo", "group": "SEO", "kw": "link building",
+     "titles": ["Link Building Specialist", "Digital PR Manager", "Outreach Specialist"],
+     "match": ["link building", "digital pr", "outreach specialist"]},
+    {"label": "SEO", "dept": "seo", "group": "SEO", "kw": "SEO",
+     "titles": ["SEO Manager", "SEO Specialist", "SEO Executive", "SEO Analyst", "Head of SEO"],
+     "match": ["seo", "search engine optim", "organic search"]},
+    {"label": "Google Ads", "dept": "digital_marketing", "group": "Paid & Performance", "kw": "Google Ads",
+     "titles": ["Google Ads Specialist", "Google Ads Manager", "AdWords Specialist"],
+     "match": ["google ads", "adwords"]},
+    {"label": "Paid Media / PPC", "dept": "digital_marketing", "group": "Paid & Performance", "kw": "PPC",
+     "titles": ["PPC Manager", "Paid Media Manager", "PPC Specialist", "Paid Search Manager"],
+     "match": ["ppc", "paid media", "paid search", "biddable"]},
+    {"label": "Social Media Marketing", "dept": "digital_marketing", "group": "Paid & Performance",
+     "kw": "social media", "titles": ["Social Media Manager", "Social Media Marketing Specialist",
+                                       "Paid Social Manager"], "match": ["social media", "paid social"]},
+    {"label": "Performance Marketing", "dept": "digital_marketing", "group": "Paid & Performance",
+     "kw": "performance marketing", "titles": ["Performance Marketing Manager", "Growth Marketing Manager"],
+     "match": ["performance marketing", "growth marketing"]},
+    {"label": "Email Marketing", "dept": "digital_marketing", "group": "Paid & Performance",
+     "kw": "email marketing", "titles": ["Email Marketing Manager", "Email Marketing Specialist",
+                                         "CRM Marketing Manager"],
+     "match": ["email marketing", "crm marketing", "lifecycle marketing"]},
+    {"label": "Marketing Automation", "dept": "digital_marketing", "group": "Paid & Performance",
+     "kw": "marketing automation", "titles": ["Marketing Automation Specialist",
+                                              "Marketing Automation Manager", "HubSpot Specialist"],
+     "match": ["marketing automation", "marketo", "hubspot", "pardot"]},
+    {"label": "Digital Marketing", "dept": "digital_marketing", "group": "Marketing & Content",
+     "kw": "digital marketing", "titles": ["Digital Marketing Manager", "Digital Marketing Specialist",
+                                           "Digital Marketing Executive"], "match": ["digital marketing"]},
+    {"label": "Conversion Rate Optimization", "dept": "digital_marketing", "group": "Marketing & Content",
+     "kw": "conversion rate optimization", "titles": ["CRO Specialist",
+                                                      "Conversion Rate Optimization Manager", "CRO Manager"],
+     "match": ["conversion rate", "cro specialist", "cro manager"]},
+    {"label": "Data Analytics and Reporting", "dept": "digital_marketing", "group": "Marketing & Content",
+     "kw": "marketing analytics", "titles": ["Marketing Analyst", "Data Analyst", "Analytics Manager",
+                                             "Reporting Analyst"],
+     "match": ["analytics", "data analyst", "reporting analyst", "data studio", "looker"]},
+    {"label": "Content Writer", "dept": "marketing", "group": "Marketing & Content", "kw": "content writer",
+     "titles": ["Content Writer", "Content Specialist", "Content Marketing Manager"],
+     "match": ["content writer", "content marketing", "content specialist"]},
+    {"label": "Content Designer", "dept": "marketing", "group": "Marketing & Content",
+     "kw": "content designer", "titles": ["Content Designer", "Content Strategist"],
+     "match": ["content designer", "content strategist"]},
+    {"label": "Copywriting", "dept": "marketing", "group": "Marketing & Content", "kw": "copywriter",
+     "titles": ["Copywriter", "Senior Copywriter", "Copywriting Lead"], "match": ["copywriter", "copywriting"]},
+    {"label": "Marketing", "dept": "marketing", "group": "Marketing & Content", "kw": "marketing",
+     "titles": ["Marketing Manager", "Marketing Director", "Head of Marketing", "CMO", "Brand Manager"],
+     "match": ["marketing", "brand manager", "cmo", "communications"]},
+    {"label": "WordPress Development", "dept": "other", "group": "Creative & Web", "kw": "WordPress",
+     "titles": ["WordPress Developer", "WordPress Designer"], "match": ["wordpress"]},
+    {"label": "Web Development", "dept": "other", "group": "Creative & Web", "kw": "web developer",
+     "titles": ["Web Developer", "Frontend Developer", "Full Stack Developer"],
+     "match": ["web developer", "frontend", "front-end", "full stack", "web development"]},
+    {"label": "UI/UX Design", "dept": "other", "group": "Creative & Web", "kw": "UX designer",
+     "titles": ["UI Designer", "UX Designer", "UI/UX Designer", "Product Designer"],
+     "match": ["ui/ux", "ux design", "ui design", "product designer", "user experience"]},
+    {"label": "Graphic Design", "dept": "other", "group": "Creative & Web", "kw": "graphic designer",
+     "titles": ["Graphic Designer", "Visual Designer", "Senior Graphic Designer"],
+     "match": ["graphic design", "visual designer"]},
+    {"label": "Video Editing and Production", "dept": "other", "group": "Creative & Web", "kw": "video editor",
+     "titles": ["Video Editor", "Video Producer", "Motion Designer"],
+     "match": ["video editor", "video produc", "motion designer", "videographer"]},
+    {"label": "E-commerce", "dept": "other", "group": "Sales & Ops", "kw": "ecommerce",
+     "titles": ["Ecommerce Manager", "E-commerce Specialist", "Shopify Developer"],
+     "match": ["ecommerce", "e-commerce", "shopify"]},
+    {"label": "Account Management", "dept": "sales", "group": "Sales & Ops", "kw": "account manager",
+     "titles": ["Account Manager", "Client Services Manager", "Account Director"],
+     "match": ["account manager", "account director", "client services", "client success"]},
+    {"label": "Sales and Business Development", "dept": "sales", "group": "Sales & Ops",
+     "kw": "business development", "titles": ["Business Development Manager", "Sales Manager",
+                                             "Account Executive", "Sales Director"],
+     "match": ["business development", "sales manager", "account executive", "sales director",
+               "bdr", "sdr", "sales executive"]},
+    {"label": "Project Management", "dept": "other", "group": "Sales & Ops", "kw": "project manager",
+     "titles": ["Project Manager", "Digital Project Manager", "Program Manager"],
+     "match": ["project manager", "program manager", "project management", "scrum master"]},
+    {"label": "Talent Acquisition", "dept": "other", "group": "People", "kw": "talent acquisition",
+     "titles": ["Talent Acquisition Specialist", "Recruiter", "Recruitment Manager",
+                "Talent Acquisition Manager"], "match": ["talent acquisition", "recruiter", "recruitment"]},
+    {"label": "HR", "dept": "other", "group": "People", "kw": "human resources",
+     "titles": ["HR Manager", "Human Resources Manager", "HR Business Partner"],
+     "match": ["human resources", "hr manager", "hr business partner", "people operations"]},
+]
+CATEGORY_DEPT = {c["label"]: c["dept"] for c in CATEGORIES}
+CATEGORY_LABELS = [c["label"] for c in CATEGORIES]
+# UI groups (preserve definition order)
+GROUPS: Dict[str, List[str]] = {}
+for _c in CATEGORIES:
+    GROUPS.setdefault(_c["group"], []).append(_c["label"])
+GROUP_ORDER = list(GROUPS.keys())
+
+
+def classify_category(title: str = "", headline: str = "") -> Optional[str]:
+    """Return the most specific matching category label, or None."""
+    text = f"{title or ''} {headline or ''}".lower()
+    if not text.strip():
+        return None
+    for c in CATEGORIES:
+        if any(tok in text for tok in c["match"]):
+            return c["label"]
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Scoring engine — 6 deterministic pure functions (0-100, neutral defaults)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -441,12 +554,18 @@ def score_role_fit(c: dict, target_families: Optional[List[str]] = None) -> int:
             best = max(best, 85)
         elif any(k in text for k in cfg["strong"]):
             best = max(best, 70)
+    # Recognised in the 28-category taxonomy (e.g. web dev, UI/UX, HR) → solid base
+    # even if it isn't one of the 4 core marketing families.
+    cat = classify_category(c.get("title", ""), c.get("headline", ""))
+    if cat and best < 65:
+        best = 65
     if best == 0:
         best = 50
-    dept = classify_department(c.get("title", ""), c.get("headline", ""),
-                               c.get("departments"), c.get("functions"))
-    if dept == "other":
-        best = round(best * 0.7)
+    if best <= 50 and not cat:
+        dept = classify_department(c.get("title", ""), c.get("headline", ""),
+                                   c.get("departments"), c.get("functions"))
+        if dept == "other":
+            best = round(best * 0.7)
     return clamp(best)
 
 
@@ -803,9 +922,12 @@ def person_to_candidate(person: dict, target_families: List[str],
             "functions": functions, "departments": departments, "_org": org,
             "company_domain": org.get("root_domain"), "linkedin_url": person.get("linkedin_url")}
 
-    dept = classify_department(title, headline, departments, functions)
-    if dept == "other" and ctx.get("family"):
-        dept = ctx["family"]  # fall back to the queried family
+    category = classify_category(title, headline) or ctx.get("category")
+    dept = CATEGORY_DEPT.get(category) if category else None
+    if not dept:
+        dept = classify_department(title, headline, departments, functions)
+        if dept == "other" and ctx.get("family"):
+            dept = ctx["family"]
     cq = score_company_quality(org)
     technical = score_technical(base)
     role_fit = score_role_fit(base, target_families)
@@ -831,7 +953,7 @@ def person_to_candidate(person: dict, target_families: List[str],
         "full_name": full or "Unknown",
         "first_name": first, "last_name": last,
         "title": title, "headline": headline[:500] if headline else None,
-        "department": dept, "departments_json": departments, "seniority": seniority,
+        "department": dept, "category": category, "departments_json": departments, "seniority": seniority,
         "linkedin_url": person.get("linkedin_url"), "photo_url": person.get("photo_url"),
         "location_city": person.get("city"), "location_country": country,
         "has_email": bool(person.get("has_email")),
@@ -958,43 +1080,74 @@ SENIORITY_GROUPS = [
 ]
 
 
+_CAT_BY_LABEL = {c["label"]: c for c in CATEGORIES}
+
+
 def build_search_queries(cfg: dict) -> List[dict]:
-    """Cartesian product of {role family} × {seniority group}. Each cell is a
-    separate paged Apollo search (the 50k cap is per-query, so partitioning broadens
-    coverage). Each cell carries `ctx` to recover seniority/department/location that
-    the thin free-search response omits."""
-    families = cfg.get("departments") or list(ROLE_FAMILIES.keys())
-    locations = cfg.get("person_locations") or []
+    """Cartesian product of {category} × {seniority group} × {country}. Each cell is
+    a separate paged Apollo search (the 50k cap is per-query, so partitioning broadens
+    coverage). The per-country split stamps a definite country onto results (the thin
+    free search omits location), powering the Company-view country tabs. `ctx` carries
+    category/department/seniority/country to backfill the omitted fields."""
+    cat_labels = cfg.get("categories") or CATEGORY_LABELS
+    locations = cfg.get("person_locations") or [None]   # None = global (no geo filter)
     org_locations = cfg.get("organization_locations") or []
     seed_domains = cfg.get("seed_domains") or []
-    single_country = locations[0] if len(locations) == 1 else None
     queries = []
-    for fam in families:
-        rcfg = ROLE_FAMILIES.get(fam)
-        if not rcfg:
-            continue
-        for grp in SENIORITY_GROUPS:
-            queries.append({
-                "department": fam, "label": f"{fam}/{grp['name']}",
-                "person_titles": rcfg["titles"],
-                "person_seniorities": grp["seniorities"],
-                "q_keywords": rcfg["keyword"],
-                "person_locations": locations,
-                "organization_locations": org_locations,
-                "seed_domains": seed_domains,
-                "ctx": {"family": fam, "seniority": grp["repr"], "country": single_country},
-            })
+    for country in locations:
+        for label in cat_labels:
+            cat = _CAT_BY_LABEL.get(label)
+            if not cat:
+                continue
+            for grp in SENIORITY_GROUPS:
+                tag = f"{label}/{grp['name']}" + (f"/{country}" if country else "")
+                queries.append({
+                    "department": cat["dept"], "category": label, "label": tag,
+                    "person_titles": cat["titles"],
+                    "person_seniorities": grp["seniorities"],
+                    "q_keywords": cat["kw"],
+                    "person_locations": [country] if country else [],
+                    "organization_locations": org_locations,
+                    "seed_domains": seed_domains,
+                    "ctx": {"family": cat["dept"], "category": label,
+                            "seniority": grp["repr"], "country": country},
+                })
     return queries
+
+
+def resolve_categories(params: dict) -> List[str]:
+    """Resolve a run's target categories from params: explicit `categories` >
+    `groups` (expanded) > legacy `departments` (mapped) > env HR_TARGET_GROUPS > all."""
+    cats = params.get("categories")
+    if cats:
+        keep = [c for c in cats if c in CATEGORY_DEPT]
+        if keep:
+            return keep
+    if params.get("groups"):
+        out = [lab for g in params["groups"] for lab in GROUPS.get(g, [])]
+        if out:
+            return out
+    if params.get("departments"):
+        deps = set(params["departments"])
+        out = [c["label"] for c in CATEGORIES if c["dept"] in deps]
+        if out:
+            return out
+    env_groups = _env_list("HR_TARGET_GROUPS")
+    if env_groups:
+        out = [lab for g in env_groups for lab in GROUPS.get(g, [])]
+        if out:
+            return out
+    return CATEGORY_LABELS
 
 
 def run_discovery(run_id: int, params: dict, job) -> dict:
     """Execute a discovery run. Streams logs into `job`. Returns stats dict.
     NEVER reveals contact info (zero credit spend)."""
     now = now_utc()
-    target_families = params.get("departments") or _env_list("HR_TARGET_DEPARTMENTS") \
-        or list(ROLE_FAMILIES.keys())
+    target_families = list(ROLE_FAMILIES.keys())  # for role_fit scoring (core 4 areas)
+    categories = resolve_categories(params)
     cfg = {
-        "departments": target_families,
+        "categories": categories,
         "person_locations": params.get("person_locations") or _env_list("HR_PERSON_LOCATIONS"),
         "organization_locations": params.get("organization_locations") or _env_list("HR_ORG_LOCATIONS"),
         "seed_domains": params.get("seed_domains") or [],
@@ -1047,6 +1200,7 @@ def run_discovery(run_id: int, params: dict, job) -> dict:
                             "annual_revenue": org.get("annual_revenue"),
                             "founded_year": org.get("founded_year"),
                             "hq_city": org.get("hq_city"), "hq_country": org.get("hq_country"),
+                            "country": cand.get("location_country"),
                             "company_quality_score": cand["company_quality_score"],
                             "source": "apollo", "confidence": 60, "payload_json": org.get("_raw")}
                     try:
@@ -1191,25 +1345,102 @@ def enrich_candidate(candidate_id: int, reveal_email: bool = True,
 #  Daily auto-refresh scheduler
 # ═══════════════════════════════════════════════════════════════════════════
 
-SCHED_POLL_SECONDS = 3600  # wake hourly
+SCHED_POLL_SECONDS = 120  # short poll → responsive to the auto-hunt toggle
+
+
+def auto_hunt_enabled() -> bool:
+    return db.SettingsRepo.get_bool("auto_hunt", _env("HR_AUTO_HUNT_DEFAULT", "0") == "1")
+
+
+def set_auto_hunt(on: bool) -> None:
+    db.SettingsRepo.set("auto_hunt", "1" if on else "0")
+    if on:
+        db.SettingsRepo.set("hunt_started_at", now_utc().isoformat())
+
+
+def hunt_status() -> dict:
+    """Single-query status snapshot (fast even over a high-latency DB proxy)."""
+    s = db.SettingsRepo.get_many(["auto_hunt", "hunt_last_at", "hunt_started_at",
+                                  "hunt_cursor", "hunt_cycles"])
+    total = len(CATEGORY_LABELS)
+    try:
+        cursor = int(s.get("hunt_cursor") or 0)
+    except (ValueError, TypeError):
+        cursor = 0
+    av = s.get("auto_hunt")
+    enabled = (av in ("1", "true", "True", "on")) if av is not None \
+        else (_env("HR_AUTO_HUNT_DEFAULT", "0") == "1")
+    n = max(1, _env_int("HUNT_CATEGORIES_PER_CYCLE", 3))
+    nextcats = [CATEGORY_LABELS[(cursor + i) % total] for i in range(min(n, total))] if total else []
+    try:
+        cycles = int(s.get("hunt_cycles") or 0)
+    except (ValueError, TypeError):
+        cycles = 0
+    return {
+        "enabled": enabled, "last_hunt_at": s.get("hunt_last_at"),
+        "started_at": s.get("hunt_started_at"), "cursor": cursor % total if total else 0,
+        "next_categories": nextcats, "total_categories": total, "cycles": cycles,
+        "interval_seconds": _env_int("HUNT_INTERVAL_SECONDS", 600),
+    }
+
+
+def _peek_hunt_categories() -> List[str]:
+    order = CATEGORY_LABELS
+    if not order:
+        return []
+    cursor = db.SettingsRepo.get_int("hunt_cursor", 0) % len(order)
+    n = max(1, _env_int("HUNT_CATEGORIES_PER_CYCLE", 3))
+    return [order[(cursor + i) % len(order)] for i in range(min(n, len(order)))]
+
+
+def _next_hunt_params():
+    order = CATEGORY_LABELS
+    cursor = db.SettingsRepo.get_int("hunt_cursor", 0) % len(order)
+    n = max(1, _env_int("HUNT_CATEGORIES_PER_CYCLE", 3))
+    cats = [order[(cursor + i) % len(order)] for i in range(min(n, len(order)))]
+    params = {"categories": cats, "person_locations": _env_list("HR_PERSON_LOCATIONS"),
+              "max_candidates": _env_int("HUNT_MAX_PER_CYCLE", 600),
+              "max_pages": _env_int("HUNT_PAGES_PER_CELL", 1), "trigger": "hunt"}
+    return params, (cursor + n) % len(order)
 
 
 def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
-    """Daily worker. `trigger_scheduled_run()` (provided by app.py) sets up a JobState
-    + run row and launches discovery in a daemon thread; returns True if started,
-    False if busy. Between daily runs, a cheap freshness-decay pass keeps scores live."""
+    """Background worker. When the auto-hunt toggle is ON, it continuously rotates
+    through the category taxonomy, launching a FREE discovery slice every
+    HUNT_INTERVAL_SECONDS (zero credits — search only). Always keeps freshness
+    scores decaying hourly. `trigger_scheduled_run(params)` returns True if started,
+    False if a run is already active."""
     log.info("Scheduler thread started (poll=%ss)", SCHED_POLL_SECONDS)
     while not stop_event.wait(SCHED_POLL_SECONDS):
         try:
-            if _env("HR_DAILY_REFRESH_ENABLED", "1") != "1":
+            # hourly freshness decay (cheap single UPDATE), independent of hunting
+            fa = db.SettingsRepo.get("freshness_at")
+            due = fa is None
+            if fa:
+                try:
+                    due = (now_utc() - datetime.datetime.fromisoformat(fa)).total_seconds() >= 3600
+                except Exception:
+                    due = True
+            if due:
+                db.CandidateRepo.recompute_freshness_all(_env_int("HR_INTENT_OPEN_THRESHOLD", 60))
+                db.SettingsRepo.set("freshness_at", now_utc().isoformat())
+
+            if not auto_hunt_enabled():
                 continue
-            last = db.RunRepo.last_run_at()
-            today = datetime.date.today()
-            if last is None or last.date() < today:
-                started = trigger_scheduled_run()
-                log.info("Scheduled daily run %s", "started" if started else "skipped (busy)")
-            else:
-                threshold = _env_int("HR_INTENT_OPEN_THRESHOLD", 60)
-                db.CandidateRepo.recompute_freshness_all(threshold)
+            # pace hunt cycles by HUNT_INTERVAL_SECONDS
+            last = db.SettingsRepo.get("hunt_last_at")
+            interval = _env_int("HUNT_INTERVAL_SECONDS", 600)
+            if last:
+                try:
+                    if (now_utc() - datetime.datetime.fromisoformat(last)).total_seconds() < interval:
+                        continue
+                except Exception:
+                    pass
+            params, new_cursor = _next_hunt_params()
+            if trigger_scheduled_run(params):
+                db.SettingsRepo.set("hunt_cursor", str(new_cursor))
+                db.SettingsRepo.set("hunt_last_at", now_utc().isoformat())
+                db.SettingsRepo.set("hunt_cycles", str(db.SettingsRepo.get_int("hunt_cycles", 0) + 1))
+                log.info("Auto-hunt cycle: %s", params["categories"])
         except Exception as e:  # pragma: no cover
             log.warning("scheduler tick error: %s", e)

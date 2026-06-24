@@ -32,10 +32,9 @@ body{
   background:var(--bg); color:var(--t1); font-family:var(--sans); font-size:14px; line-height:1.45;
   -webkit-font-smoothing:antialiased; overflow:hidden;
   background-image:
-    linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px),
-    radial-gradient(1200px 700px at 80% -10%, rgba(230,162,60,.05), transparent 60%);
-  background-size:44px 44px,44px 44px,100% 100%;
+    linear-gradient(rgba(255,255,255,.013) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.013) 1px,transparent 1px);
+  background-size:52px 52px,52px 52px;
 }
 ::selection{background:var(--amber);color:#000}
 ::-webkit-scrollbar{width:10px;height:10px}
@@ -130,8 +129,17 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 
 .main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .mhead{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);flex:none}
-.mhead .count{font-family:var(--disp);font-weight:600;font-size:16px;letter-spacing:.02em}
-.mhead .count b{color:var(--amber);font-weight:700}
+.mhead .count{font-family:var(--disp);font-weight:600;font-size:15px;letter-spacing:.02em;color:var(--t2)}
+.mhead .count b{color:var(--t1);font-weight:700}
+.tabs{display:flex;gap:2px;background:#0d0d10;border:1px solid var(--line);border-radius:9px;padding:3px}
+.tab{background:transparent;border:none;color:var(--t3);padding:7px 16px;border-radius:6px;
+  font-family:var(--disp);font-weight:600;font-size:12.5px;letter-spacing:.03em;
+  display:flex;align-items:center;gap:8px;transition:.15s}
+.tab:hover{color:var(--t1)}
+.tab.on{background:var(--bg4);color:var(--t1);box-shadow:inset 0 0 0 1px var(--line2)}
+.tab .tc{font-family:var(--mono);font-size:10px;color:var(--t4)}
+.tab.on .tc{color:var(--amber)}
+.bignum{font-family:var(--disp);font-weight:700;font-size:18px;line-height:1}
 .mscroll{flex:1;overflow-y:auto;padding:16px 22px 60px}
 
 /* ── Card rows ─────────────────────────────────────── */
@@ -268,6 +276,28 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
   border-radius:6px;padding:6px 9px;font-family:var(--mono);font-size:12px}
 .chip button{background:none;border:none;color:var(--t3);font-size:14px;line-height:1;padding:0}
 .chip button:hover{color:var(--red)}
+.chip.mini{padding:4px 8px;font-size:11px;color:var(--t2)}
+/* auto-hunt hero */
+.hunt-hero{display:flex;justify-content:space-between;align-items:center;gap:28px;
+  background:linear-gradient(135deg,#121216,#0e0e11);position:relative;overflow:hidden}
+.hunt-hero.live{border-color:var(--amber-dim);box-shadow:0 0 0 1px rgba(230,162,60,.15),0 14px 40px rgba(230,162,60,.06)}
+.hunt-hero.live::before{content:"";position:absolute;inset:0;opacity:.5;pointer-events:none;
+  background:radial-gradient(420px 180px at 90% 0%,rgba(230,162,60,.10),transparent 70%)}
+.hh-left{position:relative;z-index:1;max-width:560px}
+.hh-left h3{font-family:var(--disp);font-weight:600;font-size:23px;letter-spacing:.01em;margin:6px 0 8px;display:flex;align-items:center;gap:10px}
+.hh-left p{color:var(--t2);font-size:13px;line-height:1.5}
+.hh-meta{display:flex;gap:18px;margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--t3);flex-wrap:wrap}
+.hh-meta b{font-family:var(--disp);font-size:14px;color:var(--t1);margin-right:3px}
+.hh-right{display:flex;flex-direction:column;align-items:center;gap:8px;position:relative;z-index:1}
+.bigsw{width:92px;height:48px;border-radius:26px;background:#26262b;border:1px solid var(--line2);
+  position:relative;cursor:pointer;transition:.22s cubic-bezier(.2,.7,.2,1);flex:none}
+.bigsw.on{background:var(--amber);border-color:var(--amber)}
+.bigsw-k{position:absolute;top:4px;left:4px;width:38px;height:38px;border-radius:50%;background:#7a7a73;
+  transition:.22s cubic-bezier(.2,.7,.2,1);box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.bigsw.on .bigsw-k{left:48px;background:#1a1206}
+.bigsw-l{font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:.1em;color:var(--t3)}
+.bigsw.on+.bigsw-l,.hh-right .bigsw.on~.bigsw-l{color:var(--amber)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 0 rgba(230,162,60,.6);animation:pulse 1.8s infinite}
 @media(max-width:880px){.kpis{display:none}.filters{width:230px}.row-people{grid-template-columns:minmax(0,1.6fr) 100px 120px}.row-people .col-hide{display:none}}
 </style>
 </head>
@@ -291,6 +321,8 @@ const titleCase=s=>(s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())
 function scoreColor(v){v=+v||0; if(v>=75)return'var(--amber)'; if(v>=55)return'#cdd0d4'; if(v>=40)return'#86867f'; return'#54544f';}
 function fmtNum(n){ if(n==null)return'—'; if(n>=1e9)return(n/1e9).toFixed(1)+'B'; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'k'; return''+n; }
 function fmtDate(s){ if(!s)return'—'; try{return new Date(s).toLocaleDateString(undefined,{day:'2-digit',month:'short',year:'numeric'})}catch(e){return s} }
+function timeago(s){ if(!s)return'—'; try{const d=(Date.now()-new Date(s+(s.endsWith('Z')?'':'Z')).getTime())/1000;
+  if(d<60)return'just now'; if(d<3600)return Math.floor(d/60)+'m ago'; if(d<86400)return Math.floor(d/3600)+'h ago'; return Math.floor(d/86400)+'d ago';}catch(e){return s} }
 
 /* ── tiny components ─────────────────────────────── */
 function Gauge({label,value}){
@@ -493,36 +525,41 @@ function PeopleView({filters,setFilters,onPerson,refreshKey}){
 
 /* ── Companies view ──────────────────────────────── */
 const CSORTS=[['candidates','Most candidates'],['quality','Quality'],['employees','Employees'],['name','Name A-Z'],['recent','Recent']];
-function CompaniesView({onCompany}){
+function CompaniesView({onCompany,meta}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
-  const [f,setF]=useState({sort:'candidates',q:'',industry:'',min_quality:0});
-  const [inds,setInds]=useState([]);
-  useEffect(()=>{(async()=>{const r=await api('/api/filters');setInds(r.industries||[]);})();},[]);
+  const [f,setF]=useState({sort:'candidates',q:'',country:'',category:'',min_quality:0});
+  const cats=meta.categories||[]; const cc=meta.company_country_counts||{};
   const load=useCallback(async()=>{setLoading(true);
     const q=new URLSearchParams({page,page_size:25});
     Object.entries(f).forEach(([k,v])=>{if(v!==''&&v!=null&&v!==0)q.set(k,v);});
     const r=await api('/api/companies?'+q.toString());setData(r.rows?r:{rows:[],total:0,total_pages:1});setLoading(false);},[f,page]);
   useEffect(()=>{load();},[load]); useEffect(()=>{setPage(1);},[JSON.stringify(f)]);
+  const reset=()=>setF({sort:'candidates',q:'',country:'',category:'',min_quality:0});
   return <div className="body"><div className="filters">
-    <h3>◳ Company filters</h3>
+    <h3>Company filters</h3>
     <div className="fgroup"><label>Search</label><input className="inp sm" placeholder="Name or domain" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/></div>
-    <div className="fgroup"><label>Industry</label><select className="inp sm" value={f.industry} onChange={e=>setF({...f,industry:e.target.value})}>
-      <option value="">All industries</option>{inds.map(i=><option key={i} value={i}>{i}</option>)}</select></div>
+    <div className="fgroup"><label>Category</label><select className="inp sm" value={f.category} onChange={e=>setF({...f,category:e.target.value})}>
+      <option value="">All categories</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min company quality</label><span className="rv">{f.min_quality||0}</span></div>
       <input className="range" type="range" min="0" max="100" value={f.min_quality} onChange={e=>setF({...f,min_quality:+e.target.value})}/></div>
     <div className="fgroup"><label>Sort by</label><select className="inp sm" value={f.sort} onChange={e=>setF({...f,sort:e.target.value})}>
       {CSORTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
-    <button className="btn btn-ghost btn-block btn-sm" onClick={()=>setF({sort:'candidates',q:'',industry:'',min_quality:0})}>Reset</button>
+    <button className="btn btn-ghost btn-block btn-sm" onClick={reset}>Reset</button>
   </div><div className="main">
-    <div className="mhead"><div className="count"><b>{data.total}</b> companies</div></div>
+    <div className="mhead">
+      <div className="tabs">{[['','All'],['India','India'],['Australia','Australia']].map(([v,l])=>
+        <button key={l} className={cls('tab',f.country===v&&'on')} onClick={()=>setF({...f,country:v})}>
+          {l}<span className="tc">{cc[v||'All']??''}</span></button>)}</div>
+      <div className="spacer"/><div className="count"><b>{data.total}</b> {f.category||'companies'}</div></div>
     <div className="mscroll">{loading?<div className="empty"><span className="spin"/></div>:
-      data.rows.length===0?<div className="empty"><div className="big">No companies yet</div><div>Run a discovery sweep to populate.</div></div>:
+      data.rows.length===0?<div className="empty"><div className="big">No companies match</div>
+        <div>Try “All” regions, or turn on Auto-hunt in Discovery to populate.</div></div>:
       <div className="rows">{data.rows.map(co=><div key={co.id} className="row row-co" onClick={()=>onCompany(co.id)}>
-        <div className="cell-co"><div className="cn" style={{fontSize:14.5}}>{co.name}</div><div className="cd">{co.root_domain||'— domain pending —'}</div></div>
-        <div className="col-hide"><div className="cell-sub">Industry</div><div style={{fontSize:12.5,color:'var(--t2)'}}>{co.industry||'—'}</div></div>
-        <div style={{display:'flex',gap:14,alignItems:'center'}}>
-          <div><div className="cell-sub">People</div><div style={{fontFamily:'var(--disp)',fontWeight:700,fontSize:18}}>{co.candidate_count}</div></div>
-          <div><div className="cell-sub">Open</div><div style={{fontFamily:'var(--disp)',fontWeight:700,fontSize:18,color:co.open_count>0?'var(--amber)':'var(--t3)'}}>{co.open_count}</div></div></div>
+        <div className="cell-co"><div className="cn" style={{fontSize:14.5}}>{co.name}</div><div className="cd">{co.root_domain||'domain pending enrichment'}</div></div>
+        <div className="col-hide"><div className="cell-sub">Region</div><div style={{fontSize:12.5,color:'var(--t2)'}}>{co.country||co.hq_country||'—'}</div></div>
+        <div style={{display:'flex',gap:16,alignItems:'center'}}>
+          <div><div className="cell-sub">People</div><div className="bignum">{co.candidate_count}</div></div>
+          <div><div className="cell-sub">Open</div><div className="bignum" style={{color:co.open_count>0?'var(--amber)':'var(--t3)'}}>{co.open_count}</div></div></div>
         <Gauge label="Quality" value={co.company_quality_score}/>
       </div>)}</div>}
       {data.total_pages>1&&<Pager page={page} pages={data.total_pages} set={setPage}/>}
@@ -539,8 +576,12 @@ function Pager({page,pages,set}){
 /* ── People filter rail ──────────────────────────── */
 function PeopleFilters({f,setF,meta}){
   return <div className="filters">
-    <h3>⛛ Candidate filters</h3>
+    <h3>Candidate filters</h3>
     <div className="fgroup"><label>Search</label><input className="inp sm" placeholder="Name, title, company" value={f.q||''} onChange={e=>setF({...f,q:e.target.value})}/></div>
+    <div className="fgroup"><label>Category</label><select className="inp sm" value={f.category||''} onChange={e=>setF({...f,category:e.target.value})}>
+      <option value="">All categories</option>{(meta.categories||[]).map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+    <div className="fgroup"><label>Region</label><select className="inp sm" value={f.country||''} onChange={e=>setF({...f,country:e.target.value})}>
+      <option value="">All regions</option>{(meta.countries||['India','Australia']).map(c=><option key={c} value={c}>{c}</option>)}</select></div>
     <div className="fgroup"><label>Department</label><select className="inp sm" value={f.department||''} onChange={e=>setF({...f,department:e.target.value})}>
       <option value="">All departments</option>{(meta.all_departments||[]).map(d=><option key={d} value={d}>{DEPT_LABEL[d]||d}</option>)}</select></div>
     <div className="fgroup"><label>Seniority</label><select className="inp sm" value={f.seniority||''} onChange={e=>setF({...f,seniority:e.target.value})}>
@@ -562,22 +603,32 @@ function PeopleFilters({f,setF,meta}){
 }
 
 /* ── Discovery view ──────────────────────────────── */
-const DEPTS=[['seo','SEO','Search optimization talent'],['digital_marketing','Digital Marketing','PPC · paid · performance'],
-  ['marketing','Marketing','Brand · growth · demand gen'],['sales','Sales','BD · AE · revenue']];
-function DiscoveryView({onDone,toast}){
-  const [depts,setDepts]=useState(['seo','digital_marketing','marketing','sales']);
+function DiscoveryView({onDone,toast,meta}){
+  const groups=meta.groups||[];
+  const [hunt,setHunt]=useState(null);
+  const [sel,setSel]=useState([]);              // selected group names for a manual run
   const [locs,setLocs]=useState(['India','Australia']),[locIn,setLocIn]=useState('');
-  const [maxc,setMaxc]=useState(800),[seed,setSeed]=useState(false);
+  const [maxc,setMaxc]=useState(600),[seed,setSeed]=useState(false);
   const [job,setJob]=useState(null),[logs,setLogs]=useState([]),[prog,setProg]=useState(0),[state,setState]=useState(''),[stat,setStat]=useState('');
-  const cref=useRef(null);
-  const poll=useRef(null);
+  const cref=useRef(null), poll=useRef(null), hpoll=useRef(null), guard=useRef(0);
   useEffect(()=>{if(cref.current)cref.current.scrollTop=cref.current.scrollHeight;},[logs]);
-  const toggleD=d=>setDepts(p=>p.includes(d)?p.filter(x=>x!==d):[...p,d]);
+  useEffect(()=>{if(groups.length&&!sel.length)setSel(groups.slice(0,2).map(g=>g.name));},[groups]);
+  const loadHunt=useCallback(async()=>{const r=await api('/api/hunt');
+    if(r&&r.total_categories!=null&&Date.now()>=guard.current)setHunt(r);},[]);  // don't clobber a recent toggle
+  useEffect(()=>{loadHunt();hpoll.current=setInterval(loadHunt,10000);return()=>{clearInterval(hpoll.current);if(poll.current)clearInterval(poll.current);};},[loadHunt]);
+
+  const toggleHunt=async()=>{const next=!(hunt&&hunt.enabled);
+    guard.current=Date.now()+3000;                          // ignore in-flight loadHunt for 3s
+    setHunt(h=>({...(h||{}),enabled:next}));                 // optimistic flip
+    const r=await api('/api/hunt',{method:'POST',body:JSON.stringify({enabled:next})});
+    if(r&&r.ok)setHunt(r); else setHunt(h=>({...(h||{}),enabled:!next}));
+    toast(next?'Auto-hunt activated — continuously sourcing companies':'Auto-hunt paused', r&&r.ok?'ok':'bad');};
+  const toggleG=n=>setSel(p=>p.includes(n)?p.filter(x=>x!==n):[...p,n]);
   const addLoc=e=>{if(e.key==='Enter'&&locIn.trim()){setLocs(p=>[...new Set([...p,locIn.trim()])]);setLocIn('');e.preventDefault();}};
   const start=async()=>{
-    if(!depts.length)return toast('Pick at least one department','bad');
-    const r=await api('/api/discover',{method:'POST',body:JSON.stringify({departments:depts,person_locations:locs,max_candidates:maxc,use_seed_domains:seed})});
-    if(r.__status===409)return toast('A discovery run is already active','bad');
+    if(!sel.length)return toast('Pick at least one category group','bad');
+    const r=await api('/api/discover',{method:'POST',body:JSON.stringify({groups:sel,person_locations:locs,max_candidates:maxc,use_seed_domains:seed})});
+    if(r.__status===409)return toast('A run is already active (auto-hunt may be running)','bad');
     if(!r.job_id)return toast('Could not start run','bad');
     setJob(r.job_id);setLogs([]);setProg(0);setState('running');setStat('Starting…');
     poll.current=setInterval(async()=>{
@@ -585,36 +636,58 @@ function DiscoveryView({onDone,toast}){
       if(s.new_logs&&s.new_logs.length)setLogs(p=>[...p,...s.new_logs]);
       setProg(s.progress||0);setStat(s.status_text||'');setState(s.state);
       if(s.state!=='running'){clearInterval(poll.current);
-        if(s.state==='done'){toast('Discovery complete · '+((s.stats||{}).candidates_new||0)+' new candidates','ok');onDone&&onDone();}
+        if(s.state==='done'){toast('Run complete · '+((s.stats||{}).candidates_new||0)+' new candidates','ok');onDone&&onDone();loadHunt();}
         else if(s.state==='error')toast('Run error: '+(s.error||''),'bad');}
     },1400);};
   const cancel=async()=>{if(job){await api('/api/cancel/'+job,{method:'POST'});setStat('Cancelling…');}};
-  useEffect(()=>()=>{if(poll.current)clearInterval(poll.current);},[]);
   const running=state==='running';
+  const hOn=hunt&&hunt.enabled;
   return <div className="mscroll"><div className="disc">
-    <h2>Discovery sweep</h2>
-    <p className="lede">Pull job-change-ready candidates from Apollo — free People Search, no contact credits spent. Reveal email/phone later, per candidate.</p>
-    <div className="panel"><div className="kicker" style={{marginBottom:6}}>Target departments</div>
-      <div className="deptgrid">{DEPTS.map(([k,n,d])=><div key={k} className={cls('deptchk',depts.includes(k)&&'on')} onClick={()=>!running&&toggleD(k)}>
-        <span className={cls('sw',depts.includes(k)&&'on')}/><div><div className="dn">{n}</div><div className="dd">{d}</div></div></div>)}</div></div>
-    <div className="panel"><div className="kicker" style={{marginBottom:6}}>Regions</div>
-      <input className="inp sm" placeholder="Type a country and press Enter (e.g. India)" value={locIn} disabled={running} onChange={e=>setLocIn(e.target.value)} onKeyDown={addLoc}/>
-      <div className="chips">{locs.map(l=><span key={l} className="chip">{l}<button onClick={()=>!running&&setLocs(p=>p.filter(x=>x!==l))}>×</button></span>)}</div>
+    <h2>Discovery</h2>
+    <p className="lede">Source job-change-ready talent from Apollo — free People Search, zero contact credits. Reveal email &amp; phone later, per candidate.</p>
+
+    <div className={cls('panel','hunt-hero',hOn&&'live')}>
+      <div className="hh-left">
+        <div className="kicker">Autonomous engine</div>
+        <h3>Auto-hunt {hOn?'is active':'is paused'} {hOn&&<span className="live-dot"/>}</h3>
+        <p>Continuously rotates all {hunt?hunt.total_categories:28} categories across your regions, storing new companies &amp; candidates around the clock. Always free — no contact credits.</p>
+        {hunt&&<div className="hh-meta">
+          <span><b>{hunt.cycles||0}</b> cycles</span>
+          <span><b>{hunt.cursor||0}</b>/{hunt.total_categories} position</span>
+          <span>{hunt.last_hunt_at?('last '+timeago(hunt.last_hunt_at)):'idle'}</span></div>}
+        {hOn&&hunt.next_categories&&<div className="chips" style={{marginTop:10}}>
+          <span className="kicker" style={{alignSelf:'center'}}>next</span>
+          {hunt.next_categories.map(c=><span key={c} className="chip mini">{c}</span>)}</div>}
+      </div>
+      <div className="hh-right">
+        <div className={cls('bigsw',hOn&&'on')} onClick={toggleHunt}><div className="bigsw-k"/></div>
+        <div className="bigsw-l">{hOn?'ON':'OFF'}</div></div>
+    </div>
+
+    <div className="panel">
+      <div className="kicker" style={{marginBottom:10}}>Run once now — category groups</div>
+      <div className="deptgrid">{groups.map(g=><div key={g.name} className={cls('deptchk',sel.includes(g.name)&&'on')} onClick={()=>!running&&toggleG(g.name)}>
+        <span className={cls('sw',sel.includes(g.name)&&'on')}/><div><div className="dn">{g.name}</div>
+          <div className="dd">{(g.categories||[]).slice(0,3).join(' · ')}{g.categories&&g.categories.length>3?' …':''}</div></div></div>)}</div>
+      <div style={{marginTop:14}}><div className="kicker" style={{marginBottom:6}}>Regions</div>
+        <input className="inp sm" placeholder="Type a country and press Enter" value={locIn} disabled={running} onChange={e=>setLocIn(e.target.value)} onKeyDown={addLoc}/>
+        <div className="chips">{locs.map(l=><span key={l} className="chip">{l}<button onClick={()=>!running&&setLocs(p=>p.filter(x=>x!==l))}>×</button></span>)}</div></div>
       <div style={{display:'flex',gap:18,alignItems:'center',marginTop:16,flexWrap:'wrap'}}>
         <div style={{flex:1,minWidth:200}}><div className="rangerow"><span className="kicker">Max candidates · {maxc}</span></div>
           <input className="range" type="range" min="100" max="3000" step="100" value={maxc} disabled={running} onChange={e=>setMaxc(+e.target.value)}/></div>
-        <div className="toggle" style={{minWidth:200}} onClick={()=>!running&&setSeed(!seed)}><span className="tl">Focus on known agencies</span><span className={cls('sw',seed&&'on')}/></div>
-      </div></div>
-    {!job?<button className="btn btn-primary btn-block" style={{padding:'13px'}} onClick={start}>▶ Start discovery</button>:
-    <div className="panel">
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-        <span className="kicker">{running?'Running':state==='done'?'Complete':state} · {stat}</span>
-        {running&&<button className="btn btn-danger btn-sm" onClick={cancel}>Cancel</button>}</div>
-      <div className="pbar"><i style={{width:prog+'%'}}/></div>
-      <div className="console" ref={cref}>{logs.length===0?<div className="l">Awaiting first results…</div>:
-        logs.map((l,i)=><div key={i} className={cls('l',/new,|complete|done/i.test(l)&&'hi')}>{l}</div>)}</div>
-      {!running&&<button className="btn btn-ghost btn-block btn-sm" style={{marginTop:12}} onClick={()=>{setJob(null);setLogs([]);}}>New sweep</button>}
-    </div>}
+        <div className="toggle" style={{minWidth:210}} onClick={()=>!running&&setSeed(!seed)}><span className="tl">Focus on known agencies</span><span className={cls('sw',seed&&'on')}/></div>
+      </div>
+      {!job?<button className="btn btn-block" style={{marginTop:16}} onClick={start}>Run discovery once</button>:
+      <div style={{marginTop:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <span className="kicker">{running?'Running':state==='done'?'Complete':state} · {stat}</span>
+          {running&&<button className="btn btn-danger btn-sm" onClick={cancel}>Cancel</button>}</div>
+        <div className="pbar"><i style={{width:prog+'%'}}/></div>
+        <div className="console" ref={cref}>{logs.length===0?<div className="l">Awaiting first results…</div>:
+          logs.map((l,i)=><div key={i} className={cls('l',/new,|complete|done/i.test(l)&&'hi')}>{l}</div>)}</div>
+        {!running&&<button className="btn btn-ghost btn-block btn-sm" style={{marginTop:12}} onClick={()=>{setJob(null);setLogs([]);}}>New run</button>}
+      </div>}
+    </div>
   </div></div>;
 }
 
@@ -650,8 +723,8 @@ function App(){
     </div>
     {tab==='people'&&<div className="body"><PeopleFilters f={pf} setF={setPf} meta={meta}/>
       <div className="main"><PeopleView filters={pf} setFilters={setPf} onPerson={setPerson} refreshKey={rk}/></div></div>}
-    {tab==='companies'&&<CompaniesView onCompany={setCompany}/>}
-    {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast}/></div>}
+    {tab==='companies'&&<CompaniesView onCompany={setCompany} meta={meta}/>}
+    {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast} meta={meta}/></div>}
 
     {person&&<><div className="scrim" onClick={()=>setPerson(null)}/>
       <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast}/></>}

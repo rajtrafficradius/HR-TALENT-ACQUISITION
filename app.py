@@ -159,8 +159,8 @@ def _start_run(params: dict, trigger: str) -> Optional[str]:
     return job_id
 
 
-def _trigger_scheduled_run() -> bool:
-    return _start_run(_DEFAULT_PARAMS, "scheduled") is not None
+def _trigger_scheduled_run(params: Optional[dict] = None) -> bool:
+    return _start_run(params or _DEFAULT_PARAMS, "scheduled") is not None
 
 
 # ── scheduler bootstrap (exactly once) ───────────────────────────────────────
@@ -282,8 +282,13 @@ def api_filters():
     return jsonify({
         "departments": db.CandidateRepo.distinct_departments(),
         "seniorities": db.CandidateRepo.distinct_seniorities(),
+        "categories": core.CATEGORY_LABELS,                       # full fixed 28-item list
+        "active_categories": db.CandidateRepo.distinct_categories(),  # categories with data
+        "groups": [{"name": g, "categories": core.GROUPS[g]} for g in core.GROUP_ORDER],
         "industries": db.CompanyRepo.distinct_industries(),
         "companies": db.CandidateRepo.companies_for_filter(),
+        "countries": ["India", "Australia"],
+        "company_country_counts": db.CompanyRepo.country_counts(),
         "enrichment_statuses": ["not_enriched", "enriching", "enriched", "failed", "no_credits"],
         "all_departments": ["sales", "marketing", "seo", "digital_marketing", "other"],
     })
@@ -296,8 +301,8 @@ def api_people():
         return r
     page, page_size = _page_args()
     filters = {k: request.args.get(k) for k in (
-        "department", "seniority", "company_id", "enrichment_status", "min_overall",
-        "min_intent", "min_company_score", "open_to_shift", "freshness", "q", "sort")
+        "department", "category", "country", "seniority", "company_id", "enrichment_status",
+        "min_overall", "min_intent", "min_company_score", "open_to_shift", "freshness", "q", "sort")
         if request.args.get(k) not in (None, "")}
     rows, total = db.CandidateRepo.list_page(filters, page, page_size)
     return jsonify({"rows": rows, "total": total, "page": page, "page_size": page_size,
@@ -323,7 +328,7 @@ def api_companies():
     if (r := _require_db()):
         return r
     page, page_size = _page_args()
-    filters = {k: request.args.get(k) for k in ("industry", "min_quality", "q", "sort")
+    filters = {k: request.args.get(k) for k in ("country", "category", "min_quality", "q", "sort")
                if request.args.get(k) not in (None, "")}
     rows, total = db.CompanyRepo.list_page(filters, page, page_size)
     return jsonify({"rows": rows, "total": total, "page": page, "page_size": page_size,
@@ -381,7 +386,11 @@ def api_discover():
         return r
     data = request.get_json(silent=True) or {}
     params = {}
-    if data.get("departments"):
+    if data.get("categories"):
+        params["categories"] = [c for c in data["categories"] if c in core.CATEGORY_DEPT]
+    elif data.get("groups"):
+        params["groups"] = [g for g in data["groups"] if g in core.GROUPS]
+    elif data.get("departments"):
         params["departments"] = [d for d in data["departments"]
                                  if d in ("sales", "marketing", "seo", "digital_marketing")]
     if data.get("person_locations"):
@@ -429,6 +438,22 @@ def api_cancel(job_id):
     job.cancel_flag = True
     job.status_text = "Cancelling..."
     return jsonify({"status": "cancelling"})
+
+
+@app.get("/api/hunt")
+@require_auth
+def api_hunt_status():
+    return jsonify(core.hunt_status())
+
+
+@app.post("/api/hunt")
+@require_auth
+def api_hunt_toggle():
+    """Master auto-hunt toggle — when ON, the background scheduler continuously
+    rotates the category taxonomy and runs FREE discovery slices (zero credits)."""
+    data = request.get_json(silent=True) or {}
+    core.set_auto_hunt(bool(data.get("enabled")))
+    return jsonify({"ok": True, **core.hunt_status()})
 
 
 @app.get("/api/runs")
