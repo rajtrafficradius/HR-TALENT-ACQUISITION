@@ -386,7 +386,7 @@ def api_enrich(cid):
         return r
     data = request.get_json(silent=True) or {}
     reveal_email = bool(data.get("reveal_email", True))
-    reveal_phone = bool(data.get("reveal_phone", False))
+    reveal_phone = bool(data.get("reveal_phone", True))  # phone arrives async via webhook
 
     acquired = db.CandidateRepo.set_enriching(cid)
     if not acquired:
@@ -411,6 +411,23 @@ def api_enrich(cid):
         code = 409 if res.get("error") == "no_credits" else 400
         return jsonify(res), code
     res["phone_pending"] = bool(reveal_phone and webhook_url)
+    return jsonify(res)
+
+
+@app.post("/api/reveal-phone/<int:cid>")
+@require_auth
+def api_reveal_phone(cid):
+    """Backfill the mobile/direct phone for a candidate (works even when already enriched).
+    Apollo delivers it async to the phone webhook a few minutes later."""
+    if (r := _require_db()):
+        return r
+    tok = core.apollo_webhook_token()
+    webhook_url = (request.host_url.rstrip("/") + "/api/apollo-phone-webhook?token=" + tok) if tok else ""
+    res = core.reveal_phone_only(cid, webhook_url=webhook_url)
+    if not res.get("ok"):
+        err = res.get("error")
+        code = 404 if err == "not_found" else (402 if err == "no_credits" else 400)
+        return jsonify(res), code
     return jsonify(res)
 
 

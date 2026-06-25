@@ -472,8 +472,12 @@ function ScoreBlock({c}){
 
 /* ── Person drawer ───────────────────────────────── */
 function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
-  const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(false),[liBusy,setLiBusy]=useState(false);
+  const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(true),[liBusy,setLiBusy]=useState(false),[phBusy,setPhBusy]=useState(false);
   const load=useCallback(async()=>{const r=await api('/api/people/'+id); if(r.candidate)setD(r);},[id]);
+  const revealPhone=async()=>{if(phBusy)return;setPhBusy(true);
+    const r=await api('/api/reveal-phone/'+id,{method:'POST'});setPhBusy(false);
+    if(r&&r.ok){toast(r.phone?('Mobile: '+r.phone):'Mobile requested — arrives in ~1-3 min, refresh','ok');await load();onChanged&&onChanged();}
+    else toast(r&&r.error==='no_credits'?'Apollo phone credits exhausted':'Phone reveal failed','bad');};
   useEffect(()=>{setD(null);load();},[id,load]);
   const enrich=async()=>{setBusy(true);
     const r=await api('/api/enrich/'+id,{method:'POST',body:JSON.stringify({reveal_email:rE,reveal_phone:rP})});
@@ -559,7 +563,8 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
           <div className="contact-row"><div className="ci">✉</div>
             <div className="cv" style={{flex:1}}>{c.email?c.email:<span className="cv dim">{c.has_email?'Available — not revealed':'Not available'}</span>}</div></div>
           <div className="contact-row"><div className="ci">☏</div>
-            <div className="cv" style={{flex:1}}>{c.phone?c.phone:<span className="cv dim">{c.has_phone?'Available — not revealed':'Not available'}</span>}</div></div>
+            <div className="cv" style={{flex:1}}>{c.phone?c.phone:<span className="cv dim">{c.has_phone?'Mobile available — fetch it →':'Not available'}</span>}</div>
+            {(!c.phone&&c.has_phone)?<button className="btn btn-sm" disabled={phBusy} onClick={revealPhone} title="Apollo delivers the mobile async (~1-3 min)">{phBusy?<span className="spin sm"/>:'Get mobile'}</button>:null}</div>
           <div className="contact-row"><div className="ci">in</div>
             {c.linkedin_url?<a className="cv" href={c.linkedin_url} target="_blank" rel="noopener" style={{flex:1}}>{c.linkedin_url.replace(/^https?:\/\/(www\.)?/,'')}</a>:
               <a className="cv" href={'https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent((c.full_name||'')+' '+(c.company_name||''))} target="_blank" rel="noopener" style={{flex:1}}>Search on LinkedIn ↗ <span style={{color:'var(--t4)'}}>(exact profile on Enrich)</span></a>}</div>

@@ -2560,29 +2560,67 @@ def apollo_webhook_token() -> str:
 def handle_apollo_phone_webhook(data: dict) -> int:
     """Apollo posts the async phone-reveal result here (minutes after the match). Defensively
     locate the people + their phone numbers and write them onto candidates by apollo_person_id.
-    Returns how many candidates were updated."""
+    Returns how many candidates were updated. Logs verbosely so delivery can be diagnosed."""
     if not isinstance(data, dict):
+        log.warning("apollo phone webhook: non-dict payload")
         return 0
     people = data.get("people") or data.get("contacts") or data.get("matches") or []
     if not people and isinstance(data.get("person"), dict):
         people = [data["person"]]
     if isinstance(people, dict):
         people = [people]
+    log.info("apollo phone webhook: status=%s people=%d keys=%s",
+             data.get("status"), (len(people) if isinstance(people, list) else 0), list(data.keys())[:8])
     updated = 0
     for p in people:
         if not isinstance(p, dict):
             continue
-        pid = p.get("id") or p.get("person_id") or p.get("apollo_id")
+        pid = p.get("id") or p.get("person_id") or p.get("apollo_id") or p.get("contact_id")
         phone = _best_phone(p)
         if pid and phone:
             try:
                 if db.CandidateRepo.set_phone_by_apollo_id(str(pid), phone):
                     updated += 1
+                    log.info("apollo phone webhook: set phone for apollo_id=%s", pid)
             except Exception as e:
                 log.warning("phone webhook update failed: %s", e)
     if not updated:
-        log.info("apollo phone webhook: no usable phone in payload (keys=%s)", list(data.keys())[:8])
+        log.warning("apollo phone webhook: NO candidate updated (people=%s, sample=%s)",
+                    len(people) if isinstance(people, list) else 0,
+                    json.dumps(people[:1], default=str)[:400] if people else "[]")
     return updated
+
+
+def reveal_phone_only(candidate_id: int, webhook_url: str = "") -> dict:
+    """Request JUST the mobile/direct phone for a candidate (Apollo; async via webhook). Works
+    regardless of enrichment_status — used to backfill phones for candidates enriched email-only.
+    Returns {ok, phone, phone_pending, message}. Never reveals email (cheaper)."""
+    row = db.CandidateRepo.get(candidate_id)
+    if not row:
+        return {"ok": False, "error": "not_found"}
+    apollo = get_apollo()
+    if not getattr(apollo, "api_key", ""):
+        return {"ok": False, "error": "apollo_not_configured"}
+    res = apollo.enrich_person(
+        apollo_id=row.get("apollo_person_id") or "",
+        first_name=row.get("first_name") or "", last_name=row.get("last_name") or "",
+        domain=row.get("company_domain") or "", linkedin_url=row.get("linkedin_url") or "",
+        reveal_email=False, reveal_phone=True, webhook_url=webhook_url)
+    if res.get("_no_credits"):
+        return {"ok": False, "error": "no_credits"}
+    if not res.get("_ok"):
+        return {"ok": False, "error": "apollo_failed"}
+    phone = res.get("phone")  # occasionally present synchronously
+    if phone and row.get("apollo_person_id"):
+        try:
+            db.CandidateRepo.set_phone_by_apollo_id(str(row.get("apollo_person_id")), phone)
+        except Exception as e:
+            log.warning("reveal_phone_only set failed: %s", e)
+        return {"ok": True, "phone": phone, "phone_pending": False,
+                "candidate": db.CandidateRepo.get(candidate_id)}
+    return {"ok": True, "phone": None, "phone_pending": bool(webhook_url),
+            "message": ("Mobile requested — Apollo delivers it via webhook in ~1–3 min; refresh."
+                        if webhook_url else "Phone webhook unavailable (set APP_PASSWORD or SECRET_KEY).")}
 
 
 def coresignal_status() -> dict:
