@@ -288,6 +288,71 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
   border:1px solid var(--line2);border-radius:9px;padding:12px 18px;z-index:60;box-shadow:var(--sh);
   font-size:13px;display:flex;align-items:center;gap:10px;animation:rise .3s both;max-width:90vw}
 .toast.ok{border-color:var(--amber-dim)}.toast.bad{border-color:rgba(214,90,74,.5)}
+/* ── LinkedIn / CoreSignal enrichment ─────────────── */
+.chip.good{color:#7fcf97;border-color:rgba(95,184,122,.4);background:rgba(95,184,122,.10)}
+.chip.red{color:#e08576;border-color:rgba(214,90,74,.45);background:rgba(214,90,74,.10)}
+.chip.amber,.chip.mini.amber{color:var(--amber);border-color:var(--amber-dim);background:var(--amber-soft)}
+.src.cs{color:#7db8e0;border-color:rgba(74,158,216,.4);background:rgba(74,158,216,.12)}
+.li-enrich-btn{display:inline-flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--line2);
+  color:var(--t1);font-family:var(--disp);font-size:12.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  padding:8px 13px;border-radius:var(--rad);cursor:pointer;margin-right:14px;transition:all .15s;white-space:nowrap}
+.li-enrich-btn:hover{border-color:var(--line3);background:var(--bg4)}
+.li-enrich-btn.on{border-color:#4a9ed8;background:rgba(74,158,216,.14);color:#cfe6f6;box-shadow:0 0 0 1px rgba(74,158,216,.2)}
+.li-enrich-btn .li-ic{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;
+  background:#2f6f9f;color:#fff;font-family:var(--mono);font-size:10px;font-weight:700}
+.li-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;
+  background:radial-gradient(520px 200px at 88% 0%,rgba(74,158,216,.10),transparent 70%),var(--bg2)}
+.li-badge{flex:none;width:42px;height:42px;border-radius:10px;background:#2f6f9f;color:#fff;
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:18px}
+.li-title{font-family:var(--disp);font-weight:600;font-size:20px;letter-spacing:.01em}
+.li-desc{color:var(--t2);font-size:12.5px;margin-top:3px}
+.li-stat{display:flex;gap:8px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.li-banner{border-radius:var(--rad);padding:10px 14px;font-size:12.5px;margin:12px 0 0;border:1px solid var(--line2)}
+.li-banner.bad{color:#e8a99e;border-color:rgba(214,90,74,.4);background:rgba(214,90,74,.08)}
+.li-banner.info{color:#cfe6f6;border-color:rgba(74,158,216,.35);background:rgba(74,158,216,.08)}
+.li-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:18px;align-items:start}
+@media(max-width:1000px){.li-grid{grid-template-columns:1fr}}
+.li-search{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:var(--rad);
+  color:var(--t1);font-size:13px;padding:10px 13px;margin-bottom:12px;font-family:var(--sans)}
+.li-search:focus{outline:none;border-color:var(--line3)}
+.li-rows{display:flex;flex-direction:column;gap:6px;max-height:560px;overflow-y:auto}
+.li-empty{color:var(--t3);font-size:12.5px;padding:14px 4px}
+.li-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;
+  border:1px solid var(--line);border-radius:var(--rad);cursor:pointer;background:var(--bg);transition:all .12s}
+.li-row:hover{border-color:var(--line2);background:var(--bg3)}
+.li-row.on{border-color:#4a9ed8;background:rgba(74,158,216,.10)}
+.li-row .nm{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li-row .ttl{color:var(--t2);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li-row-badges{flex:none;display:flex;gap:5px}
+.li-selcard{background:var(--bg);border:1px solid var(--line2);border-radius:var(--rad);padding:14px;margin-bottom:14px}
+.li-selcard .ttl{color:var(--t2);font-size:12px;margin-top:2px}
+.li-go{width:100%;display:flex;align-items:center;justify-content:center;gap:9px;background:var(--amber);
+  color:#1a1407;border:none;border-radius:var(--rad);font-family:var(--disp);font-weight:600;font-size:14px;
+  letter-spacing:.03em;text-transform:uppercase;padding:12px;cursor:pointer;transition:filter .15s}
+.li-go:hover:not(:disabled){filter:brightness(1.08)}
+.li-go:disabled{opacity:.5;cursor:not-allowed}
+.li-cost{color:var(--t3);font-size:11px;text-align:center;margin-top:8px;font-family:var(--mono)}
+.spin.sm{width:14px;height:14px;border-width:2px}
+.li-picks{margin-top:14px;display:flex;flex-direction:column;gap:7px}
+.li-picks.busy{pointer-events:none;opacity:.55}
+.li-selcard .nm{font-weight:600}
+.li-pick{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;
+  border:1px solid var(--line2);border-radius:var(--rad);cursor:pointer;background:var(--bg);transition:all .12s}
+.li-pick:hover{border-color:#4a9ed8;background:rgba(74,158,216,.10)}
+.li-pick .nm{font-weight:600;font-size:13px}
+.li-pick .ttl{color:var(--t2);font-size:11.5px}
+.li-pick .cd{color:var(--t3);font-size:10.5px;font-family:var(--mono)}
+.li-pick-score{flex:none;font-family:var(--mono);font-size:12px;color:var(--amber)}
+.cs-result{margin-top:16px;border-top:1px solid var(--line);padding-top:16px}
+.cs-head{display:flex;gap:14px;align-items:center}
+.cs-name{font-family:var(--disp);font-weight:600;font-size:17px}
+.cs-sub{color:var(--t2);font-size:12.5px;margin-top:2px}
+.cs-reco{margin-top:13px;background:var(--amber-soft);border:1px solid var(--amber-dim);border-radius:var(--rad);
+  padding:10px 13px;color:var(--amber);font-size:12.5px}
+.cs-note{margin-top:9px;font-family:var(--mono);font-size:10.5px;color:var(--t4)}
+.li-open{margin-top:14px;width:100%;background:var(--bg3);border:1px solid var(--line2);color:var(--t1);
+  border-radius:var(--rad);font-size:12.5px;padding:10px;cursor:pointer}
+.li-open:hover{border-color:var(--line3);background:var(--bg4)}
 .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
 .chip{display:inline-flex;align-items:center;gap:7px;background:#0d0d10;border:1px solid var(--line2);
   border-radius:6px;padding:6px 9px;font-family:var(--mono);font-size:12px}
@@ -465,6 +530,11 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
           {a.note&&<div style={{marginTop:9,fontFamily:'var(--mono)',fontSize:10.5,color:'var(--t4)'}}>ⓘ {a.note}</div>}
         </div>);})()}
 
+      {c.coresignal_enriched&&(()=>{const cj=c.coresignal_json||{};return(
+        <div className="sect"><div className="sect-h">CoreSignal · LinkedIn &nbsp;<span className="src cs">CS ✓</span></div>
+          <CSResult result={{assessment:cj.assessment||{},coresignal:cj,match:cj.match||{}}} sel={c}/>
+        </div>);})()}
+
       <div className="sect"><div className="sect-h">Contact</div>
         <div className="contact-box">
           <div className="contact-row"><div className="ci">✉</div>
@@ -605,7 +675,8 @@ function PeopleView({filters,setFilters,onPerson,refreshKey}){
           <div className="scorebig"><span className="num" style={{fontSize:21,color:scoreColor(c.overall_candidate_score)}}>{c.overall_candidate_score}</span></div>
           <div style={{display:'flex',gap:6,alignItems:'center'}}><Avail email={c.has_email||c.email} phone={c.has_phone||c.phone}/>
             {c.enrichment_status==='enriched'?<span className="src history" title="Apollo enriched">A✓</span>:null}
-            {c.linkedin_enriched?<span className="src linkedin" title="LinkedIn enriched">in</span>:null}</div></div>
+            {c.coresignal_enriched?<span className="src cs" title="CoreSignal enriched">CS✓</span>:
+              (c.linkedin_enriched?<span className="src linkedin" title="LinkedIn enriched">in</span>:null)}</div></div>
       </div>)}</div>}
       {data.total_pages>1&&<Pager page={page} pages={data.total_pages} set={setPage}/>}
     </div></>;
@@ -833,6 +904,146 @@ function DiscoveryView({onDone,toast,meta}){
   </div></div>;
 }
 
+/* ── CoreSignal LinkedIn enrichment ───────────────── */
+function CSResult({result,onPerson,sel}){
+  const a=result.assessment||{}; const cs=result.coresignal||{}; const raw=cs.raw||{}; const m=result.match||{};
+  const cr=a.current_role||{};
+  const skills=(a.top_skills&&a.top_skills.length)?a.top_skills:(raw.skills||[]);
+  const exp=(a.key_experience&&a.key_experience.length)?a.key_experience:(raw.experience||[]);
+  return <div className="cs-result">
+    <div className="cs-head">
+      <div className="scorebig"><Ring value={a.intent_likelihood}/></div>
+      <div style={{minWidth:0,flex:1}}>
+        <div className="cs-name">{raw.full_name||(sel&&sel.full_name)||'Profile'}</div>
+        <div className="cs-sub">{cr.title||raw.current_title||'—'}{cr.company?(' · '+cr.company):''}</div>
+        <div className="chips" style={{marginTop:8}}>
+          <span className={cls('chip mini',a.open_to_work&&'amber')}>{a.open_to_work?'Open to work':'Settled'}</span>
+          {a.seniority_level&&<span className="chip mini">{titleCase(a.seniority_level)}</span>}
+          {a.years_experience!=null&&<span className="chip mini">{a.years_experience}y exp</span>}
+          {a.confidence&&<span className="chip mini">conf: {a.confidence}</span>}
+          {raw.location&&<span className="chip mini">{raw.location}</span>}
+        </div>
+      </div>
+    </div>
+    {a.summary&&<div className="blurb" style={{fontStyle:'normal',marginTop:12}}>{a.summary}</div>}
+    <div className="sgrid" style={{marginTop:12}}>
+      <div className="kv"><span className="k">Match</span><span className="v">{(m.confidence||'—')+' · '+titleCase(m.method||'')}</span></div>
+      <div className="kv"><span className="k">Source</span><span className="v">{a._source==='coresignal+openai'?'CoreSignal + AI':'CoreSignal'}</span></div>
+      <div className="kv"><span className="k">Department</span><span className="v">{a.department?titleCase(a.department):'—'}</span></div>
+      <div className="kv"><span className="k">Completeness</span><span className="v">{a.data_completeness||'—'}</span></div>
+      <div className="kv"><span className="k">Profile</span><span className="v">{cs.profile_url?<a href={cs.profile_url} target="_blank" rel="noopener">open ↗</a>:'—'}</span></div>
+      {raw.connections!=null&&<div className="kv"><span className="k">Network</span><span className="v">{fmtNum(raw.connections)} conn · {fmtNum(raw.followers)} foll</span></div>}
+    </div>
+    {(skills&&skills.length)?<div style={{marginTop:13}}><div className="cell-sub">Skills</div>
+      <div className="chips">{skills.slice(0,16).map((s,i)=><span key={i} className="chip mini">{s}</span>)}</div></div>:null}
+    {(exp&&exp.length)?<div style={{marginTop:13}}><div className="cell-sub">Experience</div>
+      <div className="timeline" style={{marginTop:8}}>{exp.slice(0,7).map((x,i)=><div key={i} className={cls('tl-item',x.current&&'cur')}>
+        <div className="tt">{x.title||'—'}</div><div className="to">{x.company||''}</div>
+        <div className="td">{(x.start||'?')+' — '+(x.current?'Present':(x.end||'?'))}</div></div>)}</div></div>:null}
+    {(raw.education&&raw.education.length)?<div style={{marginTop:13}}><div className="cell-sub">Education</div>
+      <div className="chips">{raw.education.map((e,i)=><span key={i} className="chip mini">{[e.institution,e.degree].filter(Boolean).join(' · ')||'—'}</span>)}</div></div>:null}
+    {(a.signals&&a.signals.length)?<div style={{marginTop:13}}><div className="cell-sub">Job-change signals</div>
+      <div className="chips">{a.signals.map((s,i)=><span key={i} className="chip mini">{s}</span>)}</div></div>:null}
+    {a.recommendation&&<div className="cs-reco">★ {a.recommendation}</div>}
+    {a.note&&<div className="cs-note">ⓘ {a.note}</div>}
+  </div>;
+}
+
+function LinkedInEnrichView({toast,onChanged,onPerson}){
+  const [status,setStatus]=useState(null),[q,setQ]=useState(''),[rows,setRows]=useState([]);
+  const [sel,setSel]=useState(null),[busy,setBusy]=useState(false);
+  const [result,setResult]=useState(null),[picks,setPicks]=useState(null),[msg,setMsg]=useState(null);
+  const tmr=useRef(null),busyRef=useRef(false);
+  const loadStatus=useCallback(async()=>{const r=await api('/api/coresignal-status');
+    setStatus((r&&r.dataset!=null)?r:{configured:false,dataset:null,credits_remaining:null});},[]);
+  useEffect(()=>{loadStatus();},[loadStatus]);
+  const search=useCallback(async(term)=>{
+    if(!term||term.trim().length<2){setRows([]);return;}
+    const r=await api('/api/people?q='+encodeURIComponent(term.trim())+'&page_size=15&sort=overall');
+    setRows((r&&r.rows)||[]);
+  },[]);
+  const onQ=(v)=>{setQ(v);clearTimeout(tmr.current);tmr.current=setTimeout(()=>search(v),300);};
+  const pick=(c)=>{setSel(c);setResult(null);setPicks(null);setMsg(null);};
+  const enrich=async(employee_id)=>{
+    if(!sel||busyRef.current)return;       // synchronous guard — blocks same-tick double-clicks (paid call)
+    busyRef.current=true;setBusy(true);setMsg(null);if(!employee_id){setResult(null);setPicks(null);}
+    const r=await api('/api/coresignal-enrich/'+sel.id,{method:'POST',body:JSON.stringify(employee_id?{employee_id}:{})});
+    busyRef.current=false;setBusy(false);
+    if(r&&r.credits_remaining!=null)setStatus(s=>({...(s||{}),credits_remaining:r.credits_remaining}));
+    if(r&&r.ok){setResult(r);setPicks(null);if(r.candidate)setSel(r.candidate);
+      toast('CoreSignal LinkedIn enrichment complete','ok');onChanged&&onChanged();}
+    else if(r&&r.needs_manual_pick){setPicks(r.candidates||[]);
+      setMsg({kind:'info',text:'Multiple LinkedIn profiles match — pick the correct person below.'});}
+    else{const e=r&&r.error;setMsg({kind:'bad',text:
+      e==='not_configured'?'CoreSignal API key not set. Add CORESIGNAL_API_KEY on Railway.'
+      :e==='insufficient_credits'?'CoreSignal credits exhausted — top up your CoreSignal plan.'
+      :(e==='no_match'||e==='not_found')?'No CoreSignal LinkedIn profile matched this candidate. Try the free LinkedIn check in the candidate panel.'
+      :e==='auth'?'CoreSignal rejected the key — verify CORESIGNAL_API_KEY.'
+      :('Enrichment failed'+(e?(' — '+e):'')+'.')});}
+  };
+  const configured=status&&status.configured;
+  return <div className="mscroll li-view">
+    <div className="panel li-hero">
+      <div style={{display:'flex',alignItems:'center',gap:13,minWidth:0}}>
+        <div className="li-badge">in</div>
+        <div style={{minWidth:0}}><div className="li-title">LinkedIn Enrichment</div>
+          <div className="li-desc">Manually enrich a candidate with deep LinkedIn data via CoreSignal{(status&&status.dataset)?(' · '+status.dataset):''}, summarized by AI.</div></div>
+      </div>
+      <div className="li-stat">
+        <span className={cls('chip',configured?'good':(status?'red':''))}>{status?(configured?'API connected':'Not configured'):'…'}</span>
+        {(status&&status.credits_remaining!=null)?<span className="chip">{fmtNum(status.credits_remaining)} credits left</span>:null}
+      </div>
+    </div>
+    {(status&&!configured)?<div className="li-banner bad">Set <b>CORESIGNAL_API_KEY</b> on Railway to enable enrichment. You can still browse candidates below.</div>:null}
+    <div className="li-grid">
+      <div className="panel">
+        <div className="sect-h">1 · Select a candidate</div>
+        <input className="li-search" placeholder="Search by name, title or company…" value={q} onChange={e=>onQ(e.target.value)}/>
+        <div className="li-rows">
+          {(rows.length===0&&q.trim().length>=2)?<div className="li-empty">No matching candidates.</div>:null}
+          {(rows.length===0&&q.trim().length<2)?<div className="li-empty">Type at least 2 characters to search.</div>:null}
+          {rows.map(c=><div key={c.id} className={cls('li-row',sel&&sel.id===c.id&&'on')} onClick={()=>pick(c)}>
+            <div style={{minWidth:0}}><div className="nm">{c.full_name}</div>
+              <div className="ttl">{(c.title||'—')+(c.company_name?(' · '+c.company_name):'')}</div></div>
+            <div className="li-row-badges">
+              {c.coresignal_enriched?<span className="src cs" title="CoreSignal enriched">CS✓</span>:
+                (c.linkedin_enriched?<span className="src linkedin" title="LinkedIn checked">in</span>:null)}
+            </div></div>)}
+        </div>
+      </div>
+      <div className="panel">
+        <div className="sect-h">2 · Enrich via CoreSignal</div>
+        {!sel?<div className="li-empty">Pick a candidate on the left to begin.</div>:
+        <div>
+          <div className="li-selcard">
+            <div className="nm" style={{fontSize:16}}>{sel.full_name}</div>
+            <div className="ttl">{(sel.title||'—')+(sel.company_name?(' · '+sel.company_name):'')}</div>
+            <div className="chips" style={{marginTop:8}}>
+              {sel.company_domain&&<span className="chip mini">{sel.company_domain}</span>}
+              {sel.linkedin_url&&<span className="chip mini">LinkedIn URL on file</span>}
+              {sel.coresignal_enriched?<span className="chip mini amber">already enriched</span>:null}
+            </div>
+          </div>
+          <button className="li-go" disabled={busy||(status&&!configured)} onClick={()=>enrich()}>
+            {busy?<span className="spin sm"/>:null}{busy?'Enriching…':(sel.coresignal_enriched?'Re-enrich via CoreSignal':'Enrich via CoreSignal')}</button>
+          <div className="li-cost">Uses CoreSignal credits — ~2 (LinkedIn URL on file) up to ~6 (name + company match).</div>
+          {msg?<div className={cls('li-banner',msg.kind==='bad'?'bad':'info')}>{msg.text}</div>:null}
+          {(picks&&picks.length)?<div className={cls('li-picks',busy&&'busy')}>
+            <div className="cell-sub" style={{marginBottom:8}}>Which profile is the right person?</div>
+            {picks.map((p,i)=><div key={i} className="li-pick" onClick={()=>enrich(p.id)}>
+              <div style={{minWidth:0}}><div className="nm">{p.full_name||'—'}</div>
+                <div className="ttl">{(p.title||p.headline||'—')+(p.company_name?(' · '+p.company_name):'')}</div>
+                <div className="cd">{p.company_website||p.location||''}</div></div>
+              <div className="li-pick-score">{p.score!=null?Math.round(p.score):''}</div></div>)}
+          </div>:null}
+          {result?<><CSResult result={result} onPerson={onPerson} sel={sel}/>
+            <button className="li-open" onClick={()=>onPerson&&onPerson(sel.id)}>Open full candidate profile →</button></>:null}
+        </div>}
+      </div>
+    </div>
+  </div>;
+}
+
 /* ── Root app ────────────────────────────────────── */
 function App(){
   const [authed,setAuthed]=useState(null),[tab,setTab]=useState('people');
@@ -856,6 +1067,9 @@ function App(){
       <div className="nav">{['people','companies','discovery'].map(t=>
         <button key={t} className={cls(tab===t&&'on')} onClick={()=>setTab(t)}>{t}</button>)}</div>
       <div className="spacer"/>
+      <button className={cls('li-enrich-btn',tab==='linkedin'&&'on')} onClick={()=>setTab('linkedin')}
+        title="Manually enrich a candidate via CoreSignal LinkedIn data">
+        <span className="li-ic">in</span><span>LinkedIn Enrich</span></button>
       <div className="kpis">
         <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf({sort:'intent',open_to_shift:'1'});}} title="View all candidates">
           <div className="v">{stats.candidates_total??'—'}</div><div className="l">Candidates</div></div>
@@ -871,6 +1085,7 @@ function App(){
       <div className="main"><PeopleView filters={pf} setFilters={setPf} onPerson={setPerson} refreshKey={rk}/></div></div>}
     {tab==='companies'&&<CompaniesView onCompany={setCompany} meta={meta}/>}
     {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast} meta={meta}/></div>}
+    {tab==='linkedin'&&<div className="main"><LinkedInEnrichView toast={showToast} onChanged={()=>{refresh();loadStats();}} onPerson={setPerson}/></div>}
 
     {person&&<><div className="scrim" onClick={()=>setPerson(null)}/>
       <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast} onCompany={(coid)=>{setPerson(null);setCompany(coid);}}/></>}

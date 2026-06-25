@@ -228,7 +228,7 @@ def _loads(v: Any) -> Any:
 
 
 _CAND_JSON = ("departments_json", "scores_json", "ai_meta_json",
-              "employment_history_json", "linkedin_signals_json", "payload_json")
+              "employment_history_json", "linkedin_signals_json", "coresignal_json", "payload_json")
 _COMP_JSON = ("payload_json",)
 
 
@@ -356,6 +356,10 @@ _SCHEMA_SQL: Sequence[str] = (
         linkedin_open_to_work   TINYINT(1) NULL,
         linkedin_signals_json   JSON NULL,
         linkedin_checked_at     DATETIME NULL,
+        coresignal_enriched     TINYINT(1) NOT NULL DEFAULT 0,
+        coresignal_id           VARCHAR(64) NULL,
+        coresignal_json         JSON NULL,
+        coresignal_checked_at   DATETIME NULL,
         source                  ENUM('apollo','manual') NOT NULL DEFAULT 'apollo',
         run_id                  BIGINT UNSIGNED NULL,
         confidence              TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -437,9 +441,14 @@ _MIGRATIONS = (
     ("companies", "web_checked", "ALTER TABLE companies ADD COLUMN web_checked TINYINT(1) NOT NULL DEFAULT 0"),
     ("companies", "description", "ALTER TABLE companies ADD COLUMN description TEXT NULL"),
     ("companies", "og_image", "ALTER TABLE companies ADD COLUMN og_image VARCHAR(512) NULL"),
+    ("candidates", "coresignal_enriched", "ALTER TABLE candidates ADD COLUMN coresignal_enriched TINYINT(1) NOT NULL DEFAULT 0"),
+    ("candidates", "coresignal_id", "ALTER TABLE candidates ADD COLUMN coresignal_id VARCHAR(64) NULL"),
+    ("candidates", "coresignal_json", "ALTER TABLE candidates ADD COLUMN coresignal_json JSON NULL"),
+    ("candidates", "coresignal_checked_at", "ALTER TABLE candidates ADD COLUMN coresignal_checked_at DATETIME NULL"),
 )
 _MIGRATION_INDEXES = (
     ("companies", "idx_company_webchk", "ALTER TABLE companies ADD KEY idx_company_webchk (web_checked)"),
+    ("candidates", "idx_cand_cs", "ALTER TABLE candidates ADD KEY idx_cand_cs (coresignal_enriched)"),
     ("companies", "idx_company_roster", "ALTER TABLE companies ADD KEY idx_company_roster (roster_synced_at)"),
     ("candidates", "idx_cand_li", "ALTER TABLE candidates ADD KEY idx_cand_li (linkedin_enriched)"),
     ("companies", "idx_company_country", "ALTER TABLE companies ADD KEY idx_company_country (country)"),
@@ -888,7 +897,8 @@ class CandidateRepo:
         "id, apollo_person_id, full_name, title, department, category, seniority, company_id, "
         "company_name, company_domain, has_email, has_phone, technical_score, role_fit_score, "
         "job_change_intent_score, company_quality_score, freshness_score, "
-        "overall_candidate_score, enrichment_status, linkedin_enriched, open_to_shift, intent_source, "
+        "overall_candidate_score, enrichment_status, linkedin_enriched, coresignal_enriched, "
+        "open_to_shift, intent_source, "
         "email, phone, linkedin_url, location_city, location_country, "
         "discovered_at, last_verified_at, enriched_at")
 
@@ -1064,6 +1074,40 @@ class CandidateRepo:
             sets.append("linkedin_open_to_work=%s"); params.append(1 if open_to_work else 0)
         if signals is not None:
             sets.append("linkedin_signals_json=%s"); params.append(_dumps(signals))
+        if intent_score is not None:
+            sets.append("job_change_intent_score=%s"); params.append(int(intent_score))
+        if scores_json is not None:
+            sets.append("scores_json=%s"); params.append(_dumps(scores_json))
+        if overall is not None:
+            sets.append("overall_candidate_score=%s"); params.append(int(overall))
+        if intent_score is not None:
+            sets.append("open_to_shift=IF(%s>=%s,1,0)")
+            params += [int(intent_score), int(os.environ.get("HR_INTENT_OPEN_THRESHOLD", "60"))]
+        params.append(candidate_id)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE candidates SET {', '.join(sets)} WHERE id=%s", params)
+            conn.commit()
+
+    @staticmethod
+    def apply_coresignal(candidate_id: int, *, coresignal_json: Optional[dict],
+                         coresignal_id: Optional[str], open_to_work: Optional[bool],
+                         intent_score: Optional[int], scores_json: Optional[dict],
+                         overall: Optional[int], linkedin_url: Optional[str] = None) -> None:
+        """Persist a CoreSignal LinkedIn enrichment. Stores the CoreSignal payload in its
+        own columns AND updates the shared intent fields (it IS richer LinkedIn data), so
+        the candidate's intent/open-to-shift reflect it. Mirrors apply_linkedin."""
+        sets = ["coresignal_enriched=1", "coresignal_checked_at=NOW()",
+                "linkedin_enriched=1", "linkedin_checked_at=NOW()", "intent_source='linkedin'"]
+        params: list = []
+        if coresignal_json is not None:
+            sets.append("coresignal_json=%s"); params.append(_dumps(coresignal_json))
+        if coresignal_id:
+            sets.append("coresignal_id=%s"); params.append(str(coresignal_id)[:64])
+        if linkedin_url:
+            sets.append("linkedin_url=%s"); params.append(linkedin_url[:512])
+        if open_to_work is not None:
+            sets.append("linkedin_open_to_work=%s"); params.append(1 if open_to_work else 0)
         if intent_score is not None:
             sets.append("job_change_intent_score=%s"); params.append(int(intent_score))
         if scores_json is not None:

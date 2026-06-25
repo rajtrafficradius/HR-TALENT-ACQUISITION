@@ -278,6 +278,211 @@ def get_apollo() -> ApolloClient:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  CoreSignal — manual LinkedIn enrichment (employee_multi_source, cdapi/v2)
+#  Auth: custom header `apikey`. Paid, per-candidate, explicitly user-triggered.
+# ═══════════════════════════════════════════════════════════════════════════
+class CoreSignalClient:
+    """CoreSignal cdapi/v2 client. Header auth via `apikey` (NOT Bearer). Best-effort:
+    never raises; returns {ok,status,data,error,credits}. Tracks x-credits-remaining."""
+    BASE = "https://api.coresignal.com/cdapi/v2"
+
+    def __init__(self, api_key: str, dataset: str = "employee_multi_source"):
+        self.api_key = (api_key or "").strip()
+        self.dataset = (dataset or "employee_multi_source").strip()
+        self.credits_remaining: Optional[int] = None
+        self._limiter = RateLimiter(0.2)
+
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
+    def _headers(self, post: bool = False) -> dict:
+        h = {"apikey": self.api_key, "accept": "application/json"}
+        if post:
+            h["Content-Type"] = "application/json"
+        return h
+
+    def _note_credits(self, resp) -> None:
+        v = resp.headers.get("x-credits-remaining")
+        if v is not None:
+            try:
+                self.credits_remaining = int(v)
+            except (ValueError, TypeError):
+                pass
+
+    def _request(self, method: str, path: str, json_body=None) -> dict:
+        if not self.configured():
+            return {"ok": False, "status": 0, "data": None, "error": "not_configured", "credits": None}
+        url = f"{self.BASE}/{path}"
+        for attempt in range(2):
+            try:
+                self._limiter.wait()
+                resp = requests.request(method, url, headers=self._headers(post=json_body is not None),
+                                        json=json_body, timeout=30)
+            except Exception as e:
+                return {"ok": False, "status": 0, "data": None,
+                        "error": f"network:{str(e)[:120]}", "credits": self.credits_remaining}
+            self._note_credits(resp)
+            sc = resp.status_code
+            if sc == 429:
+                if attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                return {"ok": False, "status": 429, "data": None, "error": "rate_limited", "credits": self.credits_remaining}
+            if sc == 200:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = None
+                return {"ok": True, "status": 200, "data": data, "error": None, "credits": self.credits_remaining}
+            if sc == 402:
+                return {"ok": False, "status": 402, "data": None, "error": "insufficient_credits", "credits": self.credits_remaining}
+            if sc in (401, 403):
+                return {"ok": False, "status": sc, "data": None, "error": "auth", "credits": self.credits_remaining}
+            if sc in (404, 422, 454):
+                return {"ok": False, "status": sc, "data": None, "error": "no_data", "credits": self.credits_remaining}
+            return {"ok": False, "status": sc, "data": None, "error": f"http_{sc}", "credits": self.credits_remaining}
+        return {"ok": False, "status": 0, "data": None, "error": "unknown", "credits": self.credits_remaining}  # unreachable safety net
+
+    def collect(self, id_or_slug) -> dict:
+        from urllib.parse import quote
+        return self._request("GET", f"{self.dataset}/collect/{quote(str(id_or_slug), safe='')}")
+
+    def search(self, body: dict, preview: bool = False) -> dict:
+        sub = "search/es_dsl/preview" if preview else "search/es_dsl"
+        return self._request("POST", f"{self.dataset}/{sub}", json_body=body)
+
+
+_coresignal_singleton: Optional[CoreSignalClient] = None
+_coresignal_lock = threading.Lock()
+
+
+def get_coresignal() -> CoreSignalClient:
+    """Singleton; rebuilds if the env key was set/rotated since (Railway may set it after
+    boot, or a wrong key may be corrected) so a corrected key is picked up without a hard
+    restart — preserving the cached credits_remaining when the key is unchanged."""
+    global _coresignal_singleton
+    with _coresignal_lock:
+        key = _env("CORESIGNAL_API_KEY")
+        if _coresignal_singleton is None or _coresignal_singleton.api_key != key:
+            _coresignal_singleton = CoreSignalClient(
+                key, _env("CORESIGNAL_DATASET", "employee_multi_source"))
+        return _coresignal_singleton
+
+
+def _linkedin_slug(url: str) -> Optional[str]:
+    """Bare vanity slug from a LinkedIn profile URL (linkedin.com/in/<slug>)."""
+    if not url:
+        return None
+    m = re.search(r"linkedin\.com/(?:in|pub)/([^/?#]+)", url, re.I)
+    if not m:
+        return None
+    return (m.group(1).strip().strip("/") or None)
+
+
+def _registrable_domain(host_or_url: str) -> str:
+    """Normalize a website/host to a comparable domain (lowercase, no scheme/www/path)."""
+    if not host_or_url:
+        return ""
+    s = str(host_or_url).strip().lower()
+    s = re.sub(r"^[a-z]+://", "", s)
+    s = s.split("/")[0].split("?")[0]
+    s = re.sub(r"^www\.", "", s)
+    return s.strip()
+
+
+def _domain_match(a: str, b: str) -> bool:
+    a, b = _registrable_domain(a), _registrable_domain(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return ".".join(a.split(".")[-2:]) == ".".join(b.split(".")[-2:])
+
+
+def _title_tokens(t: str) -> set:
+    return set(re.findall(r"[a-z0-9]+", (t or "").lower())) - {"the", "of", "and", "a", "at", "to"}
+
+
+def _title_overlap(a: str, b: str) -> int:
+    return len(_title_tokens(a) & _title_tokens(b))
+
+
+def _cs_build_search_body(full_name: str, title: str, company_name: str,
+                          company_domain: str, relax: int = 0) -> dict:
+    """ES DSL body. relax 0: name+title+(company/domain); 1: name+company; 2: name+domain; 3: name only."""
+    must = [{"match": {"full_name": {"query": full_name, "operator": "and"}}}]
+    should: list = []
+    dom = _registrable_domain(company_domain)
+    if relax == 0 and title:
+        must.append({"match": {"active_experience_title": {"query": title, "operator": "and"}}})
+    if relax in (0, 1) and company_name:
+        should.append({"match": {"active_experience_company_name": {"query": company_name, "operator": "and"}}})
+    if relax in (0, 1, 2) and dom:
+        should.append({"query_string": {"query": f"*{dom}*", "default_field": "active_experience_company_website"}})
+    bool_q: dict = {"must": must}
+    if should:
+        bool_q["should"] = should
+        bool_q["minimum_should_match"] = 1
+    return {"query": {"bool": bool_q}, "sort": ["_score"]}
+
+
+def _cs_preview_company_site(p: dict) -> str:
+    return p.get("active_experience_company_website") or p.get("company_website") or ""
+
+
+def _cs_preview_title(p: dict) -> str:
+    return p.get("active_experience_title") or p.get("headline") or ""
+
+
+def _cs_pick_best(previews: list, company_domain: str, title: str):
+    """Return (best_preview, confidence, method, ambiguous)."""
+    if not previews:
+        return None, "none", "no_results", False
+    if len(previews) == 1:
+        return previews[0], "medium", "single_result", False
+    dommatched = [p for p in previews if _domain_match(_cs_preview_company_site(p), company_domain)]
+    if len(dommatched) == 1:
+        return dommatched[0], "high", "domain_match", False
+    if len(dommatched) > 1:
+        best = max(dommatched, key=lambda p: _title_overlap(_cs_preview_title(p), title))
+        return best, "high", "domain_match+title", False
+    ranked = sorted(previews, key=lambda p: _title_overlap(_cs_preview_title(p), title), reverse=True)
+    if _title_overlap(_cs_preview_title(ranked[0]), title) > 0 and (
+            len(ranked) == 1 or _title_overlap(_cs_preview_title(ranked[0]), title)
+            > _title_overlap(_cs_preview_title(ranked[1]), title)):
+        return ranked[0], "medium", "title_overlap", False
+    # Multiple candidates, NO domain match and NO clear title-overlap winner: a top-_score
+    # pick on (especially) a name-only query is essentially arbitrary. Never auto-spend a
+    # paid collect on a stranger — force the user to pick the right person.
+    ps = sorted(previews, key=lambda p: p.get("_score") or 0, reverse=True)
+    return ps[0], "low", "ambiguous", True
+
+
+def _cs_preview_brief(p: dict) -> dict:
+    return {"id": p.get("id"), "full_name": p.get("full_name"),
+            "headline": p.get("headline"), "title": _cs_preview_title(p),
+            "company_name": p.get("company_name"),
+            "company_website": _cs_preview_company_site(p),
+            "location": p.get("location_full") or p.get("location_country"),
+            "score": p.get("_score"),
+            "profile_url": p.get("professional_network_url")}
+
+
+def _cs_profile_url(rec: dict) -> Optional[str]:
+    u = rec.get("professional_network_url") or ""
+    if "linkedin.com" in u.lower():
+        return u
+    sh = rec.get("professional_network_canonical_shorthand_name") or rec.get("shorthand_name")
+    if sh:
+        return f"https://www.linkedin.com/in/{sh}"
+    return None
+
+
+def _looks_like_linkedin(u: Optional[str]) -> bool:
+    return bool(u and "linkedin.com" in u.lower())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Org extraction
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1828,6 +2033,274 @@ def enrich_linkedin(candidate_id: int) -> dict:
                                     scores_json=scores_json, overall=overall)
     return {"ok": True, "candidate": db.CandidateRepo.get(candidate_id), "assessment": assess,
             "linkedin_fetched": bool(fetched.get("_ok"))}
+
+
+# ── CoreSignal enrichment flow ───────────────────────────────────────────────
+def coresignal_resolve(candidate: dict) -> dict:
+    """Resolve a known candidate → ONE CoreSignal employee record. Branch A (linkedin_url
+    direct collect) → Branch B (preview-first search → disambiguate → collect). Returns
+    {ok, record, match, needs_manual_pick, candidates, error, status, credits}."""
+    cs = get_coresignal()
+    if not cs.configured():
+        return {"ok": False, "error": "not_configured", "record": None, "credits": None}
+    name = (candidate.get("full_name") or "").strip()
+    title = (candidate.get("title") or "").strip()
+    company = (candidate.get("company_name") or "").strip()
+    domain = (candidate.get("company_domain") or "").strip()
+    if not name:
+        return {"ok": False, "error": "no_name", "record": None, "credits": cs.credits_remaining}
+
+    def _fatal(r):  # auth / credit errors that should stop the flow
+        if r["status"] == 402:
+            return {"ok": False, "error": "insufficient_credits", "record": None, "status": 402, "credits": r["credits"]}
+        if r["status"] in (401, 403):
+            return {"ok": False, "error": "auth", "record": None, "status": r["status"], "credits": r["credits"]}
+        return None
+
+    # BRANCH A — direct collect by LinkedIn slug (cheapest, most precise)
+    slug = _linkedin_slug(candidate.get("linkedin_url") or "")
+    if slug:
+        r = cs.collect(slug)
+        if r["ok"] and isinstance(r["data"], dict) and r["data"].get("id"):
+            return {"ok": True, "record": r["data"], "needs_manual_pick": False, "candidates": [],
+                    "match": {"confidence": "high", "method": "linkedin_url", "id": r["data"].get("id")},
+                    "error": None, "status": 200, "credits": r["credits"]}
+        f = _fatal(r)
+        if f:
+            return f
+        # else 404/no_data → fall through to Branch B
+
+    # BRANCH B — preview-first search, disambiguate, then collect ONE id
+    previews: list = []
+    for relax in (0, 1, 2, 3):
+        body = _cs_build_search_body(name, title, company, domain, relax=relax)
+        pv = cs.search(body, preview=True)
+        if not pv["ok"]:
+            f = _fatal(pv)
+            if f:
+                return f
+            continue
+        if isinstance(pv["data"], list) and pv["data"]:
+            previews = pv["data"][:15]
+            break
+    if not previews:
+        return {"ok": False, "error": "no_match", "record": None, "candidates": [], "credits": cs.credits_remaining}
+
+    best, conf, method, ambiguous = _cs_pick_best(previews, domain, title)
+    if ambiguous:
+        return {"ok": False, "needs_manual_pick": True, "record": None,
+                "candidates": [_cs_preview_brief(p) for p in previews], "error": "ambiguous",
+                "credits": cs.credits_remaining}
+    c = cs.collect(best.get("id"))
+    if c["ok"] and isinstance(c["data"], dict):
+        return {"ok": True, "record": c["data"], "needs_manual_pick": False, "candidates": [],
+                "match": {"confidence": conf, "method": method, "id": best.get("id")},
+                "error": None, "status": 200, "credits": c["credits"]}
+    f = _fatal(c)
+    if f:
+        return f
+    return {"ok": False, "error": "collect_failed", "record": None, "credits": c["credits"]}
+
+
+def _cs_exp_brief(exp: list, n: int) -> list:
+    out = []
+    for e in (exp or []):
+        if not isinstance(e, dict):
+            continue
+        out.append({"title": e.get("position_title") or e.get("title"),
+                    "company": e.get("company_name"), "start": e.get("date_from"),
+                    "end": (e.get("date_to") or "present"), "months": e.get("duration_months"),
+                    "current": bool(e.get("active_experience"))})
+    return out[:n]
+
+
+def _cs_store_fields(rec: dict) -> dict:
+    """Compact subset of the CoreSignal record kept for UI display."""
+    return {
+        "full_name": rec.get("full_name"), "headline": rec.get("headline"),
+        "summary": rec.get("summary"), "location": rec.get("location_full"),
+        "country": rec.get("location_country"), "current_title": rec.get("active_experience_title"),
+        "department": rec.get("active_experience_department"),
+        "management_level": rec.get("active_experience_management_level"),
+        "is_decision_maker": rec.get("is_decision_maker"),
+        "total_experience_months": rec.get("total_experience_duration_months"),
+        "connections": rec.get("connections_count"), "followers": rec.get("followers_count"),
+        "skills": (rec.get("inferred_skills") or rec.get("skills") or [])[:25],
+        "experience": _cs_exp_brief(rec.get("experience"), 12),
+        "education": [{"institution": e.get("institution_name") or e.get("title"),
+                       "degree": e.get("degree") or e.get("subtitle"),
+                       "end": e.get("date_to") or e.get("date_to_year")}
+                      for e in (rec.get("education") or []) if isinstance(e, dict)][:8],
+        "certifications": [{"title": c.get("title"), "issuer": c.get("issuer") or c.get("subtitle")}
+                           for c in (rec.get("certifications") or []) if isinstance(c, dict)][:10],
+        "languages": rec.get("languages"),
+        "recent_started": rec.get("experience_recently_started"),
+        "recent_closed": rec.get("experience_recently_closed"),
+        "updated_at": rec.get("updated_at") or rec.get("checked_at"),
+        "profile_url": _cs_profile_url(rec),
+    }
+
+
+def _cs_openai_payload(rec: dict, candidate: dict) -> dict:
+    exp = _cs_exp_brief(rec.get("experience"), 8)
+    return {
+        "name": rec.get("full_name") or candidate.get("full_name"),
+        "headline": rec.get("headline"), "about": rec.get("summary"),
+        "current_title": rec.get("active_experience_title") or candidate.get("title"),
+        "current_company": (exp[0]["company"] if exp else candidate.get("company_name")),
+        "department": rec.get("active_experience_department"),
+        "management_level": rec.get("active_experience_management_level"),
+        "is_decision_maker": rec.get("is_decision_maker"),
+        "location": rec.get("location_full"),
+        "total_experience_months": rec.get("total_experience_duration_months"),
+        "skills": rec.get("inferred_skills") or rec.get("skills"),
+        "experience": exp,
+        "education": [{"institution": e.get("institution_name") or e.get("title"),
+                       "degree": e.get("degree") or e.get("subtitle"),
+                       "end_year": e.get("date_to_year") or e.get("date_to")}
+                      for e in (rec.get("education") or []) if isinstance(e, dict)][:6],
+        "certifications": [{"title": c.get("title"), "issuer": c.get("issuer") or c.get("subtitle"),
+                            "year": c.get("date_from_year") or c.get("date_from")}
+                           for c in (rec.get("certifications") or []) if isinstance(c, dict)][:8],
+        "languages": rec.get("languages"),
+        "recent_role_started": rec.get("experience_recently_started"),
+        "recent_role_closed": rec.get("experience_recently_closed"),
+        "experience_change_last_identified_at": rec.get("experience_change_last_identified_at"),
+        "data_source": "coresignal_multi_source",
+        "record_updated_at": rec.get("updated_at") or rec.get("checked_at"),
+    }
+
+
+def _cs_heuristic_assess(rec: dict, candidate: dict, note: str = "") -> dict:
+    exp = rec.get("experience") or []
+    hist = [{"title": e.get("position_title") or e.get("title"),
+             "organization_name": e.get("company_name"), "start_date": e.get("date_from"),
+             "end_date": e.get("date_to"), "current": bool(e.get("active_experience"))}
+            for e in exp if isinstance(e, dict)]
+    score, regime, _ = score_job_change_intent({
+        "employment_history": hist,
+        "title": rec.get("active_experience_title") or candidate.get("title", ""),
+        "headline": rec.get("headline") or ""})
+    started = rec.get("experience_recently_started") or []
+    keyexp = _cs_exp_brief(exp, 5)
+    months = rec.get("total_experience_duration_months") or 0
+    return {"_source": "coresignal",
+            "summary": rec.get("summary") or rec.get("headline"),
+            "current_role": {"title": rec.get("active_experience_title"),
+                             "company": (keyexp[0]["company"] if keyexp else candidate.get("company_name"))},
+            "seniority_level": rec.get("active_experience_management_level") or candidate.get("seniority"),
+            "department": rec.get("active_experience_department") or candidate.get("department"),
+            "years_experience": (round(months / 12, 1) if months else None),
+            "top_skills": (rec.get("inferred_skills") or rec.get("skills") or [])[:8],
+            "key_experience": [{"title": e["title"], "company": e["company"],
+                                "start": e["start"], "end": e["end"]} for e in keyexp],
+            "education": [{"institution": e.get("institution_name") or e.get("title"),
+                           "degree": e.get("degree") or e.get("subtitle")}
+                          for e in (rec.get("education") or []) if isinstance(e, dict)][:4],
+            "open_to_work": (score >= 65 or bool(started)),
+            "intent_likelihood": score, "confidence": "medium",
+            "signals": ([f"recently started role at {started[0].get('company_name')}"] if started else [])
+            + [f"intent regime: {regime}"],
+            "recommendation": "Review the CoreSignal LinkedIn profile.",
+            "data_completeness": "high" if exp else "low", "note": note}
+
+
+def openai_coresignal_assess(candidate: dict, record: dict) -> dict:
+    """Concise structured LinkedIn assessment from a CoreSignal record via gpt-4o-mini
+    (JSON mode). Uses ONLY provided data; degrades to a heuristic when OpenAI is absent."""
+    if not openai_available():
+        return _cs_heuristic_assess(record, candidate,
+                                    note="OpenAI key absent — summary derived directly from CoreSignal data.")
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        payload = _cs_openai_payload(record, candidate)
+        sysmsg = ("You are an HR analyst producing a concise LinkedIn-based assessment of a known "
+                  "candidate from CoreSignal structured data. Use ONLY the provided fields — NEVER "
+                  "invent experience, skills, education, employers, or dates. If a field is absent, "
+                  "omit it or use null. Output STRICT JSON: "
+                  '{"summary":"<=45 words, only from provided data",'
+                  '"current_role":{"title":str,"company":str},'
+                  '"seniority_level":"intern|entry|manager|senior|director|vp|c_suite",'
+                  '"department":"sales|marketing|seo|digital_marketing|engineering|other",'
+                  '"years_experience":number,'
+                  '"top_skills":[str],"key_experience":[{"title":str,"company":str,"start":str,"end":str}],'
+                  '"education":[{"institution":str,"degree":str}],'
+                  '"open_to_work":bool,"intent_likelihood":0-100,"confidence":"low|medium|high",'
+                  '"signals":["short factual job-change signals from the data"],'
+                  '"recommendation":"<=20 words for the recruiter",'
+                  '"data_completeness":"low|medium|high"}')
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0.2, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": sysmsg},
+                      {"role": "user", "content": json.dumps(payload, default=str)}], timeout=45)
+        out = json.loads(resp.choices[0].message.content)
+        out["_source"] = "coresignal+openai"
+        return out
+    except Exception as e:
+        note = ("OpenAI key invalid/unreachable — summary from CoreSignal data only.") \
+            if ("401" in str(e) or "api_key" in str(e).lower()) else str(e)[:160]
+        return _cs_heuristic_assess(record, candidate, note=note)
+
+
+def enrich_coresignal(candidate_id: int, employee_id=None) -> dict:
+    """The 'Enrich via CoreSignal' action: resolve the candidate to a CoreSignal LinkedIn
+    record, summarize with OpenAI, store it, and recompute intent. PAID (CoreSignal credits).
+    Pass employee_id to collect a specific record (used after a manual disambiguation pick)."""
+    row = db.CandidateRepo.get(candidate_id)
+    if not row:
+        return {"ok": False, "error": "not_found"}
+    cs = get_coresignal()
+    if not cs.configured():
+        return {"ok": False, "error": "not_configured",
+                "message": "Set CORESIGNAL_API_KEY on Railway to enable CoreSignal LinkedIn enrichment."}
+
+    if employee_id:
+        c = cs.collect(employee_id)
+        if not (c["ok"] and isinstance(c["data"], dict)):
+            err = "insufficient_credits" if c["status"] == 402 else (c["error"] or "collect_failed")
+            return {"ok": False, "error": err, "credits_remaining": c["credits"]}
+        res = {"ok": True, "record": c["data"], "credits": c["credits"],
+               "match": {"confidence": "high", "method": "manual_pick", "id": employee_id}}
+    else:
+        res = coresignal_resolve(row)
+
+    if not res.get("ok"):
+        out = {"ok": False, "error": res.get("error"), "credits_remaining": res.get("credits")}
+        if res.get("needs_manual_pick"):
+            out["needs_manual_pick"] = True
+            out["candidates"] = res.get("candidates") or []
+        return out
+
+    record = res["record"]
+    assess = openai_coresignal_assess(row, record)
+    intent = assess.get("intent_likelihood")
+    intent = clamp(intent) if isinstance(intent, (int, float)) else int(row.get("job_change_intent_score") or 50)
+    overall = score_overall({"role_fit": row.get("role_fit_score", 50), "intent": intent,
+                             "technical": row.get("technical_score", 50),
+                             "company_quality": row.get("company_quality_score", 50),
+                             "freshness": row.get("freshness_score", 100)})
+    resolved_url = _cs_profile_url(record) or row.get("linkedin_url")
+    cs_store = {"checked_at": now_utc().isoformat(), "coresignal_id": record.get("id"),
+                "match": res.get("match"), "profile_url": resolved_url,
+                "raw": _cs_store_fields(record), "assessment": assess,
+                "credits_remaining": res.get("credits"), "dataset": cs.dataset}
+    scores_json = {**(row.get("scores_json") or {}), "intent": intent, "overall": overall,
+                   "intent_regime": "coresignal", "coresignal": assess}
+    db.CandidateRepo.apply_coresignal(
+        candidate_id, coresignal_json=cs_store,
+        coresignal_id=(str(record.get("id")) if record.get("id") is not None else None),
+        open_to_work=assess.get("open_to_work"), intent_score=intent,
+        scores_json=scores_json, overall=overall,
+        linkedin_url=(resolved_url if _looks_like_linkedin(resolved_url) else None))
+    return {"ok": True, "candidate": db.CandidateRepo.get(candidate_id), "assessment": assess,
+            "match": res.get("match"), "coresignal": cs_store, "credits_remaining": res.get("credits")}
+
+
+def coresignal_status() -> dict:
+    cs = get_coresignal()
+    return {"configured": cs.configured(), "dataset": cs.dataset,
+            "credits_remaining": cs.credits_remaining}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

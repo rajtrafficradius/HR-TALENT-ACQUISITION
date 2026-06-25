@@ -502,6 +502,38 @@ def api_linkedin_enrich(cid):
     return jsonify(res)
 
 
+@app.get("/api/coresignal-status")
+@require_auth
+def api_coresignal_status():
+    """Whether CoreSignal is configured + the last-seen remaining credits."""
+    return jsonify(core.coresignal_status())
+
+
+@app.post("/api/coresignal-enrich/<int:cid>")
+@require_auth
+def api_coresignal_enrich(cid):
+    """Manual, per-candidate LinkedIn enrichment via CoreSignal (employee_multi_source).
+    PAID — consumes CoreSignal credits. Optional body {"employee_id": N} collects a
+    specific record after a manual disambiguation pick."""
+    if (r := _require_db()):
+        return r
+    body = request.get_json(silent=True) or {}
+    employee_id = body.get("employee_id")
+    res = core.enrich_coresignal(cid, employee_id=employee_id)
+    if not res.get("ok"):
+        err = res.get("error")
+        if err == "not_found":
+            return jsonify(res), 404
+        if err == "not_configured":
+            return jsonify(res), 503
+        if err == "insufficient_credits":
+            return jsonify(res), 402
+        # needs_manual_pick / not_found-match / ambiguous / collect_failed → 200 so the
+        # UI can render the options/message without treating it as a hard error.
+        return jsonify(res), 200
+    return jsonify(res)
+
+
 @app.get("/api/roster")
 @require_auth
 def api_roster_status():
