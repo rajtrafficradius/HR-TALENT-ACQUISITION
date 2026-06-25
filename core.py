@@ -2186,9 +2186,22 @@ def enrich_linkedin(candidate_id: int) -> dict:
 
 
 # ── CoreSignal enrichment flow ───────────────────────────────────────────────
+def _cs_linkedin_search_body(slug: str, url: str = "") -> dict:
+    """Precise ES DSL to find ONE employee by their LinkedIn shorthand/URL (unique key) —
+    used when collect-by-slug 404s because CoreSignal's canonical shorthand != the LinkedIn
+    vanity slug."""
+    should = [
+        {"match": {"professional_network_canonical_shorthand_name": slug}},
+        {"query_string": {"query": "*" + slug + "*", "default_field": "professional_network_url"}},
+    ]
+    return {"query": {"bool": {"should": should, "minimum_should_match": 1}}, "sort": ["_score"]}
+
+
 def coresignal_resolve(candidate: dict) -> dict:
-    """Resolve a known candidate → ONE CoreSignal employee record. Branch A (linkedin_url
-    direct collect) → Branch B (preview-first search → disambiguate → collect). Returns
+    """Resolve a known candidate → ONE CoreSignal employee record. Branch A (resolve by the
+    LinkedIn URL: collect by slug → by URL → precise URL/shorthand search) → Branch B
+    (name+company preview search → disambiguate → collect). When a LinkedIn URL is present we
+    never fall to a fuzzy name-based manual pick. Returns
     {ok, record, match, needs_manual_pick, candidates, error, status, credits}."""
     cs = get_coresignal()
     if not cs.configured():
@@ -2207,18 +2220,41 @@ def coresignal_resolve(candidate: dict) -> dict:
             return {"ok": False, "error": "auth", "record": None, "status": r["status"], "credits": r["credits"]}
         return None
 
-    # BRANCH A — direct collect by LinkedIn slug (cheapest, most precise)
-    slug = _linkedin_slug(candidate.get("linkedin_url") or "")
+    # BRANCH A — resolve by the LinkedIn URL precisely; never fall to a fuzzy name pick.
+    li_url = (candidate.get("linkedin_url") or "").strip()
+    slug = _linkedin_slug(li_url)
+    had_url = bool(slug)
     if slug:
-        r = cs.collect(slug)
-        if r["ok"] and isinstance(r["data"], dict) and r["data"].get("id"):
-            return {"ok": True, "record": r["data"], "needs_manual_pick": False, "candidates": [],
-                    "match": {"confidence": "high", "method": "linkedin_url", "id": r["data"].get("id")},
-                    "error": None, "status": 200, "credits": r["credits"]}
-        f = _fatal(r)
-        if f:
-            return f
-        # else 404/no_data → fall through to Branch B
+        # 1) deterministic collect by the bare slug, then by the full URL (both accepted)
+        for key in (slug, li_url):
+            if not key:
+                continue
+            r = cs.collect(key)
+            if r["ok"] and isinstance(r["data"], dict) and r["data"].get("id"):
+                return {"ok": True, "record": r["data"], "needs_manual_pick": False, "candidates": [],
+                        "match": {"confidence": "high", "method": "linkedin_url", "id": r["data"].get("id")},
+                        "error": None, "status": 200, "credits": r["credits"]}
+            f = _fatal(r)
+            if f:
+                return f
+        # 2) collect-by-slug 404s when CoreSignal's canonical shorthand != the LinkedIn vanity
+        #    slug — so SEARCH by the LinkedIn URL/shorthand (unique) and collect the match.
+        pv = cs.search(_cs_linkedin_search_body(slug, li_url), preview=True)
+        if pv["ok"] and isinstance(pv["data"], list) and pv["data"]:
+            best_li = pv["data"][0]
+            c = cs.collect(best_li.get("id"))
+            if c["ok"] and isinstance(c["data"], dict):
+                return {"ok": True, "record": c["data"], "needs_manual_pick": False, "candidates": [],
+                        "match": {"confidence": "high", "method": "linkedin_search", "id": best_li.get("id")},
+                        "error": None, "status": 200, "credits": c["credits"]}
+            f = _fatal(c)
+            if f:
+                return f
+        elif not pv["ok"]:
+            f = _fatal(pv)
+            if f:
+                return f
+        # All LinkedIn-URL paths failed → fall to name+company below, but AUTO-pick (no prompt).
 
     # BRANCH B — preview-first search, disambiguate, then collect ONE id
     previews: list = []
@@ -2237,7 +2273,8 @@ def coresignal_resolve(candidate: dict) -> dict:
         return {"ok": False, "error": "no_match", "record": None, "candidates": [], "credits": cs.credits_remaining}
 
     best, conf, method, ambiguous = _cs_pick_best(previews, domain, title)
-    if ambiguous:
+    if ambiguous and not had_url:
+        # only bother the user with a manual pick when we had NO explicit LinkedIn URL to go on
         return {"ok": False, "needs_manual_pick": True, "record": None,
                 "candidates": [_cs_preview_brief(p) for p in previews], "error": "ambiguous",
                 "credits": cs.credits_remaining}
