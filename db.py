@@ -1298,6 +1298,11 @@ class StatsRepo:
                 out["enriched"] = int(cur.fetchone()["c"])
                 cur.execute("SELECT COUNT(*) AS c FROM candidates WHERE open_to_shift=1")
                 out["open_to_shift"] = int(cur.fetchone()["c"])
+                # of the open-to-shift, how many had that intent VERIFIED via LinkedIn data
+                # (CoreSignal or the public-profile check)
+                cur.execute("SELECT COUNT(*) AS c FROM candidates WHERE open_to_shift=1 "
+                            "AND (coresignal_enriched=1 OR linkedin_enriched=1)")
+                out["open_to_shift_li"] = int(cur.fetchone()["c"])
                 cur.execute("SELECT department, COUNT(*) AS c FROM candidates GROUP BY department")
                 out["by_department"] = {r["department"]: int(r["c"]) for r in (cur.fetchall() or [])}
                 cur.execute("SELECT state, started_at FROM runs ORDER BY started_at DESC LIMIT 1")

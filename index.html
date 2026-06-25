@@ -350,6 +350,15 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .cs-reco{margin-top:13px;background:var(--amber-soft);border:1px solid var(--amber-dim);border-radius:var(--rad);
   padding:10px 13px;color:var(--amber);font-size:12.5px}
 .cs-note{margin-top:9px;font-family:var(--mono);font-size:10.5px;color:var(--t4)}
+/* LinkedIn-intelligence blue box (intent verified via CoreSignal) */
+.cs-box{border:1.5px solid rgba(74,158,216,.5);background:rgba(74,158,216,.05);border-radius:var(--rad2);padding:18px;margin-bottom:18px}
+.cs-box .cs-h{color:#9fcdea}
+.cs-box .cs-h .src.cs{color:#bcdcf2;border-color:rgba(74,158,216,.5);background:rgba(74,158,216,.16)}
+.cs-intent .en{color:#7db8e0}
+.cs-intent .ek{color:#6f93ab}
+.kpi .v .liv{color:#7db8e0;font-weight:600}
+.li-drawer-btn{border-color:rgba(74,158,216,.5);color:#cfe6f6}
+.li-drawer-btn:hover:not(:disabled){border-color:#4a9ed8;background:rgba(74,158,216,.12)}
 .li-open{margin-top:14px;width:100%;background:var(--bg3);border:1px solid var(--line2);color:var(--t1);
   border-radius:var(--rad);font-size:12.5px;padding:10px;cursor:pointer}
 .li-open:hover{border-color:var(--line3);background:var(--bg4)}
@@ -471,11 +480,16 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
     if(r.__status===409&&r.error==='no_credits'){toast('Apollo credits exhausted — reveal unavailable','bad');}
     else if(r.ok){toast(r.cached?'Already enriched':'Enriched · contact revealed','ok');await load();onChanged&&onChanged();}
     else{toast('Enrichment failed','bad');await load();}};
-  const linkedinEnrich=async()=>{setLiBusy(true);
-    const r=await api('/api/linkedin-enrich/'+id,{method:'POST'});
+  const linkedinEnrich=async()=>{if(liBusy)return;setLiBusy(true);
+    const r=await api('/api/coresignal-enrich/'+id,{method:'POST',body:JSON.stringify({})});
     setLiBusy(false);
-    if(r&&r.ok){toast(r.linkedin_fetched?'LinkedIn checked — intent confirmed':'LinkedIn limited (used available data)','ok');await load();onChanged&&onChanged();}
-    else toast('LinkedIn enrich failed','bad');};
+    if(r&&r.ok){toast('LinkedIn enriched via CoreSignal','ok');await load();onChanged&&onChanged();}
+    else if(r&&r.needs_manual_pick){toast('Multiple LinkedIn profiles match — open "LinkedIn Enrich" (top right) to pick the right one','bad');}
+    else{const e=r&&r.error;toast(
+      e==='not_configured'?'Set CORESIGNAL_API_KEY on Railway to enable this':
+      e==='insufficient_credits'?'CoreSignal credits exhausted':
+      (e==='no_match'||e==='not_found')?'No LinkedIn profile matched this candidate':
+      e==='auth'?'CoreSignal rejected the API key':'LinkedIn enrich failed','bad');}};
   if(!d)return <div className="drawer"><div className="dhead"><div className="top"><div><h2>Loading…</h2></div>
     <button className="iconbtn" onClick={onClose}>✕</button></div></div>
     <div className="dbody"><div className="empty"><span className="spin"/></div></div></div>;
@@ -507,7 +521,16 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
             {enriched?'Evidence-based from employment history.':'Inferred from title, seniority & company signals. Enrich for evidence-based intent from real employment history.'}</p>}
         {ai.why&&<div className="blurb">{ai.why}</div>}</div>
 
-      {c.linkedin_enriched&&(()=>{const li=c.linkedin_signals_json||{};const a=li.assessment||{};return(
+      {!!c.coresignal_enriched&&(()=>{const cj=c.coresignal_json||{};const a=cj.assessment||{};return(
+        <div className="sect cs-box"><div className="sect-h cs-h">LinkedIn intelligence&nbsp;<span className="src cs">CoreSignal · AI ✓</span></div>
+          <div className="evid cs-intent" style={{marginBottom:12}}>
+            <div className="ev"><div className="en">{a.intent_likelihood??'—'}</div><div className="ek">Shift likelihood</div></div>
+            <div className="ev"><div className="en" style={{fontSize:15}}>{a.open_to_work?'Open to shift':'Settled'}</div><div className="ek">LinkedIn-verified</div></div>
+            <div className="ev"><div className="en" style={{fontSize:14}}>{a.confidence||'—'}</div><div className="ek">Confidence</div></div></div>
+          <CSResult result={{assessment:a,coresignal:cj,match:cj.match||{}}} sel={c} compact={true}/>
+        </div>);})()}
+
+      {c.linkedin_signals_json&&!c.coresignal_enriched&&(()=>{const li=c.linkedin_signals_json||{};const a=li.assessment||{};return(
         <div className="sect"><div className="sect-h">LinkedIn assessment &nbsp;<span className="src linkedin">LinkedIn ✓</span></div>
           <div className="evid" style={{marginBottom:12}}>
             <div className="ev"><div className="en">{a.intent_likelihood??'—'}</div><div className="ek">Shift likelihood</div></div>
@@ -530,11 +553,6 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
           {a.note&&<div style={{marginTop:9,fontFamily:'var(--mono)',fontSize:10.5,color:'var(--t4)'}}>ⓘ {a.note}</div>}
         </div>);})()}
 
-      {c.coresignal_enriched&&(()=>{const cj=c.coresignal_json||{};return(
-        <div className="sect"><div className="sect-h">CoreSignal · LinkedIn &nbsp;<span className="src cs">CS ✓</span></div>
-          <CSResult result={{assessment:cj.assessment||{},coresignal:cj,match:cj.match||{}}} sel={c}/>
-        </div>);})()}
-
       <div className="sect"><div className="sect-h">Contact</div>
         <div className="contact-box">
           <div className="contact-row"><div className="ci">✉</div>
@@ -555,10 +573,10 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
             ✓ APOLLO ENRICHED {c.enriched_at?('· '+fmtDate(c.enriched_at)):''}</div>}
           <div className="enrich-ctl" style={{marginTop:12,borderTop:'1px solid var(--line)',paddingTop:12}}>
             <div style={{flex:1}}>
-              <div style={{fontSize:12.5,color:c.linkedin_enriched?'var(--amber)':'var(--t2)'}}>{c.linkedin_enriched?'✓ LinkedIn checked':'Confirm job-change intent via LinkedIn'}</div>
-              <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--t4)',marginTop:2}}>searches the public profile + AI · free</div></div>
-            <button className="btn btn-sm" disabled={liBusy} onClick={linkedinEnrich}>
-              {liBusy?<span className="spin"/>:(c.linkedin_enriched?'↻ Re-check':'Enrich via LinkedIn')}</button></div>
+              <div style={{fontSize:12.5,color:c.coresignal_enriched?'#7db8e0':'var(--t2)'}}>{c.coresignal_enriched?'✓ LinkedIn verified · CoreSignal':'Verify job-change intent via LinkedIn'}</div>
+              <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--t4)',marginTop:2}}>CoreSignal LinkedIn profile + AI · uses credits</div></div>
+            <button className="btn btn-sm li-drawer-btn" disabled={liBusy} onClick={linkedinEnrich}>
+              {liBusy?<span className="spin"/>:(c.coresignal_enriched?'↻ Re-enrich LinkedIn':'Enrich via LinkedIn')}</button></div>
         </div></div>
 
       {eh.length>0&&<div className="sect"><div className="sect-h">Employment history</div>
@@ -905,13 +923,13 @@ function DiscoveryView({onDone,toast,meta}){
 }
 
 /* ── CoreSignal LinkedIn enrichment ───────────────── */
-function CSResult({result,onPerson,sel}){
+function CSResult({result,onPerson,sel,compact}){
   const a=result.assessment||{}; const cs=result.coresignal||{}; const raw=cs.raw||{}; const m=result.match||{};
   const cr=a.current_role||{};
   const skills=(a.top_skills&&a.top_skills.length)?a.top_skills:(raw.skills||[]);
   const exp=(a.key_experience&&a.key_experience.length)?a.key_experience:(raw.experience||[]);
-  return <div className="cs-result">
-    <div className="cs-head">
+  return <div className="cs-result" style={compact?{marginTop:0,borderTop:'none',paddingTop:0}:undefined}>
+    {!compact&&<div className="cs-head">
       <div className="scorebig"><Ring value={a.intent_likelihood}/></div>
       <div style={{minWidth:0,flex:1}}>
         <div className="cs-name">{raw.full_name||(sel&&sel.full_name)||'Profile'}</div>
@@ -924,7 +942,7 @@ function CSResult({result,onPerson,sel}){
           {raw.location&&<span className="chip mini">{raw.location}</span>}
         </div>
       </div>
-    </div>
+    </div>}
     {a.summary&&<div className="blurb" style={{fontStyle:'normal',marginTop:12}}>{a.summary}</div>}
     <div className="sgrid" style={{marginTop:12}}>
       <div className="kv"><span className="k">Match</span><span className="v">{(m.confidence||'—')+' · '+titleCase(m.method||'')}</span></div>
@@ -1074,7 +1092,7 @@ function App(){
         <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf({sort:'intent',open_to_shift:'1'});}} title="View all candidates">
           <div className="v">{stats.candidates_total??'—'}</div><div className="l">Candidates</div></div>
         <div className="kpi kpi-btn open" onClick={()=>{setTab('people');setPf({sort:'intent',open_to_shift:'1'});}} title="Show only open-to-shift candidates">
-          <div className="v am">{stats.open_to_shift??'—'}</div><div className="l">Open to shift ▸</div></div>
+          <div className="v am">{stats.open_to_shift??'—'}{stats.open_to_shift_li!=null&&<span className="liv" title="Verified via LinkedIn (CoreSignal)"> ({stats.open_to_shift_li})</span>}</div><div className="l">Open to shift ▸</div></div>
         <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf({sort:'overall',enrichment_status:'any_enriched'});}} title="Show enriched candidates">
           <div className="v">{stats.enriched??'—'}</div><div className="l">Enriched</div></div>
         <div className="kpi kpi-btn" onClick={()=>setTab('companies')} title="View companies">
