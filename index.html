@@ -355,6 +355,7 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .cs-box .cs-h{color:#9fcdea}
 .cs-box .cs-h .src.cs{color:#bcdcf2;border-color:rgba(74,158,216,.5);background:rgba(74,158,216,.16)}
 .cs-intent .en{color:#7db8e0}
+.chip.blue,.chip.mini.blue{color:#9fcdea;border-color:rgba(74,158,216,.4);background:rgba(74,158,216,.10)}
 .cs-intent .ek{color:#6f93ab}
 .kpi .v .liv{color:#7db8e0;font-weight:600}
 .li-drawer-btn{border-color:rgba(74,158,216,.5);color:#cfe6f6}
@@ -927,8 +928,16 @@ function DiscoveryView({onDone,toast,meta}){
 function CSResult({result,onPerson,sel,compact}){
   const a=result.assessment||{}; const cs=result.coresignal||{}; const raw=cs.raw||{}; const m=result.match||{};
   const cr=a.current_role||{};
-  const skills=(a.top_skills&&a.top_skills.length)?a.top_skills:(raw.skills||[]);
-  const exp=(a.key_experience&&a.key_experience.length)?a.key_experience:(raw.experience||[]);
+  const bio=a.professional_summary||a.summary||raw.summary||raw.headline||'';
+  const expertise=(a.expertise&&a.expertise.length)?a.expertise:(raw.skills||[]);
+  const skills=(raw.skills&&raw.skills.length)?raw.skills:(a.top_skills||[]);
+  const hist=(a.career_history&&a.career_history.length)?a.career_history:((a.key_experience&&a.key_experience.length)?a.key_experience:(raw.experience||[]));
+  const edu=(raw.education&&raw.education.length)?raw.education:(a.education||[]);
+  const certs=(raw.certifications&&raw.certifications.length)?raw.certifications:(a.certifications||[]);
+  const langs=raw.languages||a.languages||[];
+  let prev=(a.previous_companies||[]).slice();
+  if(!prev.length){const seen={};(raw.experience||[]).forEach(e=>{if(e.company&&!e.current&&!seen[e.company]){seen[e.company]=1;prev.push(e.company);}});}
+  const yrs=a.years_experience!=null?a.years_experience:(raw.total_experience_months?Math.round(raw.total_experience_months/12):null);
   return <div className="cs-result" style={compact?{marginTop:0,borderTop:'none',paddingTop:0}:undefined}>
     {!compact&&<div className="cs-head">
       <div className="scorebig"><Ring value={a.intent_likelihood}/></div>
@@ -938,29 +947,37 @@ function CSResult({result,onPerson,sel,compact}){
         <div className="chips" style={{marginTop:8}}>
           <span className={cls('chip mini',a.open_to_work&&'amber')}>{a.open_to_work?'Open to work':'Settled'}</span>
           {a.seniority_level&&<span className="chip mini">{titleCase(a.seniority_level)}</span>}
-          {a.years_experience!=null&&<span className="chip mini">{a.years_experience}y exp</span>}
+          {yrs!=null&&<span className="chip mini">{yrs}y exp</span>}
           {a.confidence&&<span className="chip mini">conf: {a.confidence}</span>}
           {raw.location&&<span className="chip mini">{raw.location}</span>}
         </div>
       </div>
     </div>}
-    {a.summary&&<div className="blurb" style={{fontStyle:'normal',marginTop:12}}>{a.summary}</div>}
-    <div className="sgrid" style={{marginTop:12}}>
-      <div className="kv"><span className="k">Match</span><span className="v">{(m.confidence||'—')+' · '+titleCase(m.method||'')}</span></div>
-      <div className="kv"><span className="k">Source</span><span className="v">{a._source==='coresignal+openai'?'CoreSignal + AI':'CoreSignal'}</span></div>
+    {bio&&<div><div className="cell-sub">Bio</div><div className="blurb" style={{fontStyle:'normal',marginTop:4}}>{bio}</div></div>}
+    {(expertise&&expertise.length)?<div style={{marginTop:13}}><div className="cell-sub">Expertise</div>
+      <div className="chips">{expertise.slice(0,14).map((s,i)=><span key={i} className="chip mini blue">{s}</span>)}</div></div>:null}
+    <div className="sgrid" style={{marginTop:13}}>
+      <div className="kv"><span className="k">Currently</span><span className="v">{(cr.title||raw.current_title||'—')+(cr.company?(' @ '+cr.company):'')}</span></div>
+      <div className="kv"><span className="k">Experience</span><span className="v">{yrs!=null?(yrs+' yrs'):'—'}</span></div>
       <div className="kv"><span className="k">Department</span><span className="v">{a.department?titleCase(a.department):'—'}</span></div>
-      <div className="kv"><span className="k">Completeness</span><span className="v">{a.data_completeness||'—'}</span></div>
+      <div className="kv"><span className="k">Network</span><span className="v">{raw.connections!=null?(fmtNum(raw.connections)+' conn · '+fmtNum(raw.followers)+' foll'):'—'}</span></div>
+      <div className="kv"><span className="k">Match</span><span className="v">{(m.confidence||'—')+' · '+titleCase(m.method||'')}</span></div>
       <div className="kv"><span className="k">Profile</span><span className="v">{cs.profile_url?<a href={cs.profile_url} target="_blank" rel="noopener">open ↗</a>:'—'}</span></div>
-      {raw.connections!=null&&<div className="kv"><span className="k">Network</span><span className="v">{fmtNum(raw.connections)} conn · {fmtNum(raw.followers)} foll</span></div>}
     </div>
-    {(skills&&skills.length)?<div style={{marginTop:13}}><div className="cell-sub">Skills</div>
-      <div className="chips">{skills.slice(0,16).map((s,i)=><span key={i} className="chip mini">{s}</span>)}</div></div>:null}
-    {(exp&&exp.length)?<div style={{marginTop:13}}><div className="cell-sub">Experience</div>
-      <div className="timeline" style={{marginTop:8}}>{exp.slice(0,7).map((x,i)=><div key={i} className={cls('tl-item',x.current&&'cur')}>
+    {(hist&&hist.length)?<div style={{marginTop:14}}><div className="cell-sub">Work history · {hist.length} roles</div>
+      <div className="timeline" style={{marginTop:8}}>{hist.slice(0,12).map((x,i)=><div key={i} className={cls('tl-item',x.current&&'cur')}>
         <div className="tt">{x.title||'—'}</div><div className="to">{x.company||''}</div>
-        <div className="td">{(x.start||'?')+' — '+(x.current?'Present':(x.end||'?'))}</div></div>)}</div></div>:null}
-    {(raw.education&&raw.education.length)?<div style={{marginTop:13}}><div className="cell-sub">Education</div>
-      <div className="chips">{raw.education.map((e,i)=><span key={i} className="chip mini">{[e.institution,e.degree].filter(Boolean).join(' · ')||'—'}</span>)}</div></div>:null}
+        <div className="td">{(x.start||'?')+' — '+(x.current?'Present':(x.end||'?'))}{x.focus?(' · '+x.focus):''}</div></div>)}</div></div>:null}
+    {(prev&&prev.length)?<div style={{marginTop:13}}><div className="cell-sub">Previous companies</div>
+      <div className="chips">{prev.slice(0,12).map((c,i)=><span key={i} className="chip mini">{c}</span>)}</div></div>:null}
+    {(skills&&skills.length)?<div style={{marginTop:13}}><div className="cell-sub">Skills</div>
+      <div className="chips">{skills.slice(0,20).map((s,i)=><span key={i} className="chip mini">{s}</span>)}</div></div>:null}
+    {(edu&&edu.length)?<div style={{marginTop:13}}><div className="cell-sub">Education</div>
+      <div className="chips">{edu.map((e,i)=><span key={i} className="chip mini">{[e.institution,e.degree].filter(Boolean).join(' · ')||'—'}</span>)}</div></div>:null}
+    {(certs&&certs.length)?<div style={{marginTop:13}}><div className="cell-sub">Certifications</div>
+      <div className="chips">{certs.map((c,i)=><span key={i} className="chip mini">{[c.title,c.issuer].filter(Boolean).join(' · ')||'—'}</span>)}</div></div>:null}
+    {(langs&&langs.length)?<div style={{marginTop:13}}><div className="cell-sub">Languages</div>
+      <div className="chips">{langs.map((l,i)=><span key={i} className="chip mini">{(typeof l==='string')?l:((l&&(l.language||l.name))||'—')}</span>)}</div></div>:null}
     {(a.signals&&a.signals.length)?<div style={{marginTop:13}}><div className="cell-sub">Job-change signals</div>
       <div className="chips">{a.signals.map((s,i)=><span key={i} className="chip mini">{s}</span>)}</div></div>:null}
     {a.recommendation&&<div className="cs-reco">★ {a.recommendation}</div>}

@@ -222,10 +222,15 @@ class ApolloClient:
 
         self.counter["match"] += 1
         person = (resp.json() or {}).get("person") or {}
+        org = person.get("organization") or {}
+        co_phone = safe_str(org.get("phone") or org.get("sanitized_phone"))
+        pp = org.get("primary_phone")
+        if not co_phone and isinstance(pp, dict):
+            co_phone = safe_str(pp.get("number") or pp.get("sanitized_number"))
         return {
             "_ok": True, "_http_status": 200, "_retried": retried,
-            "email": _best_email(person),
-            "phone": _best_phone(person),
+            "email": _best_email(person, first_name, last_name),
+            "phone": _best_phone(person, co_phone),
             "employment_history": person.get("employment_history") or [],
             "person": person,
         }
@@ -254,25 +259,160 @@ class ApolloClient:
             return -1
 
 
-def _best_email(person: dict) -> Optional[str]:
-    e = person.get("email")
-    if e and "@" in str(e) and "email_not_unlocked" not in str(e):
-        return str(e)
-    for pe in (person.get("personal_emails") or []):
-        if pe and "@" in str(pe):
-            return str(pe)
-    return None
+def safe_str(x) -> str:
+    return "" if x is None else str(x).strip()
 
 
-def _best_phone(person: dict) -> Optional[str]:
-    for ph in (person.get("phone_numbers") or []):
-        if isinstance(ph, dict):
-            num = ph.get("sanitized_number") or ph.get("raw_number")
-            if num:
-                return str(num)
-        elif ph:
-            return str(ph)
-    return None
+# Consumer/personal email domains — an address here is "personal", anything else at a
+# company domain is treated as an official/work email. (Ported from LEAD FORGE V5.py.)
+PERSONAL_EMAIL_DOMAINS = {
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "yahoo.com.au", "yahoo.ca",
+    "yahoo.co.in", "ymail.com", "rocketmail.com", "hotmail.com", "hotmail.co.uk",
+    "hotmail.com.au", "hotmail.ca", "outlook.com", "outlook.com.au", "live.com",
+    "live.com.au", "msn.com", "passport.com", "icloud.com", "me.com", "mac.com", "aol.com",
+    "protonmail.com", "proton.me", "pm.me", "fastmail.com", "fastmail.fm", "zoho.com",
+    "tutanota.com", "tutamail.com", "hey.com", "mail.com", "email.com", "bigpond.com",
+    "bigpond.net.au", "telstra.com", "optusnet.com.au", "tpg.com.au", "tpg.com",
+    "internode.on.net", "aapt.net.au", "iprimus.com.au", "westnet.com.au", "dodo.com.au",
+    "btinternet.com", "btopenworld.com", "sky.com", "talktalk.net", "virgin.net",
+    "ntlworld.com", "blueyonder.co.uk", "rediffmail.com", "indiatimes.com", "gmx.com",
+    "gmx.net", "gmx.de", "web.de", "t-online.de", "seznam.cz", "yandex.com", "yandex.ru",
+}
+
+
+def is_personal_email(email: str) -> bool:
+    """True ONLY for known consumer domains (gmail, yahoo, …). first@company.com is NOT
+    personal — it's an official/work email."""
+    if not email or "@" not in email:
+        return False
+    return email.lower().split("@")[-1].strip() in PERSONAL_EMAIL_DOMAINS
+
+
+def _email_contains_person_name(email_addr: str, first_name: str = "", last_name: str = "") -> bool:
+    if not email_addr or "@" not in email_addr:
+        return False
+    local = email_addr.lower().split("@")[0]
+    clean = local.replace(".", "").replace("-", "").replace("_", "")
+    fl = (first_name or "").lower().strip()
+    ll = (last_name or "").lower().strip()
+    if fl and len(fl) >= 2 and (fl in local or fl in clean):
+        return True
+    if ll and len(ll) >= 2 and (ll in local or ll in clean):
+        return True
+    return False
+
+
+def _pick_best_email_from_apollo(person: dict, first_name: str = "", last_name: str = ""):
+    """Pick the proper OFFICIAL/personal email (never the masked 'email_not_unlocked'
+    placeholder). Priority: business-primary → business → personal-primary → personal →
+    company-domain org/contact → name-based personal_emails → consumer → any. Ported from
+    LEAD FORGE V5.py. Returns (email, is_from_personal_list)."""
+    def _ok(e):
+        return bool(e) and "@" in e and "email_not_unlocked" not in e
+    structured = person.get("emails") or []
+    flat_personal = [safe_str(e) for e in (person.get("personal_emails") or []) if _ok(safe_str(e))]
+    org_email = safe_str(person.get("email"))
+    contact_email = safe_str(person.get("contact_email"))
+    org_email = org_email if _ok(org_email) else ""
+    contact_email = contact_email if _ok(contact_email) else ""
+
+    if structured:
+        bp, bo, pp, po = [], [], [], []
+        for em in structured:
+            if not isinstance(em, dict):
+                continue
+            addr = safe_str(em.get("email"))
+            if not _ok(addr):
+                continue
+            etype = (em.get("email_type") or em.get("type") or "").lower()
+            etag = (em.get("email_tag") or em.get("tag") or em.get("label") or "").lower()
+            estatus = (em.get("email_status") or em.get("status") or "").lower()
+            is_primary = ("primary" in etag or "primary" in estatus or "primary" in etype
+                          or em.get("position") == 0)
+            is_business = ("business" in etype or "professional" in etype or "work" in etype
+                           or "primary" in etype)
+            if is_business and not is_personal_email(addr):
+                (bp if is_primary else bo).append(addr)
+            elif "personal" in etype or is_personal_email(addr):
+                (pp if is_primary else po).append(addr)
+        for bucket in (bp, bo, pp, po):
+            if bucket:
+                return bucket[0], True
+
+    for em in (org_email, contact_email):
+        if em and not is_personal_email(em):
+            return em, False
+
+    if flat_personal:
+        name_based, consumer = [], []
+        for em in flat_personal:
+            (consumer if is_personal_email(em) else name_based).append(em)
+        if name_based:
+            return name_based[0], True
+        if consumer:
+            return consumer[0], True
+
+    for em in (org_email, contact_email):
+        if em:
+            return em, False
+    return "", False
+
+
+# Phone type → quality score: personal/direct numbers win over the company switchboard.
+_PHONE_TYPE_SCORES = {
+    "mobile": 50, "direct": 40, "work_direct": 40, "direct_dial": 40, "personal": 35,
+    "home": 30, "other": 15, "work": 15, "work_hq": 5, "company_hq": 5, "corporate": 5,
+    "headquarters": 5, "main": 5,
+}
+
+
+def _pick_best_phone_from_apollo(person: dict, company_phone: str = ""):
+    """Pick the most personal/direct phone (mobile > direct > personal > home > … > HQ),
+    excluding the generic company switchboard. Handles both the standard (type) and async
+    webhook (type_cd) shapes, plus singular fallback fields. Ported from LEAD FORGE V5.py.
+    Returns (phone, quality_score)."""
+    co_digits = re.sub(r"\D", "", company_phone) if company_phone else ""
+    phones = person.get("phone_numbers") or []
+    if not phones:
+        for field in ("phone_number", "direct_phone_number", "sanitized_phone", "phone"):
+            singular = safe_str(person.get(field))
+            if singular:
+                if co_digits and re.sub(r"\D", "", singular) == co_digits:
+                    continue
+                return singular, 25
+        return "", 0
+    scored = []
+    for pn in phones:
+        if not isinstance(pn, dict):
+            continue
+        number = safe_str(pn.get("sanitized_number") or pn.get("number") or pn.get("raw_number"))
+        if not number:
+            continue
+        ptype = (pn.get("type") or pn.get("type_cd") or "").lower().strip()
+        pstatus = (pn.get("status") or pn.get("status_cd") or "").lower()
+        plabel = (pn.get("label") or pn.get("tag") or "").lower()
+        is_primary = pn.get("is_primary") or pn.get("position") == 0
+        is_default = ("default" in pstatus or "default" in plabel or "default" in ptype)
+        score = _PHONE_TYPE_SCORES.get(ptype, 20)
+        if is_primary:
+            score += 3
+        if is_default:
+            score += 20
+        if co_digits and re.sub(r"\D", "", number) == co_digits:
+            score = min(score, 5)
+        scored.append((score, number))
+    if not scored:
+        return "", 0
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored[0][1], scored[0][0]
+
+
+def _best_email(person: dict, first_name: str = "", last_name: str = "") -> Optional[str]:
+    return _pick_best_email_from_apollo(person, first_name, last_name)[0] or None
+
+
+def _best_phone(person: dict, company_phone: str = "") -> Optional[str]:
+    return _pick_best_phone_from_apollo(person, company_phone)[0] or None
 
 
 _apollo_singleton: Optional[ApolloClient] = None
@@ -2152,7 +2292,7 @@ def _cs_store_fields(rec: dict) -> dict:
 
 
 def _cs_openai_payload(rec: dict, candidate: dict) -> dict:
-    exp = _cs_exp_brief(rec.get("experience"), 8)
+    exp = _cs_exp_brief(rec.get("experience"), 12)
     return {
         "name": rec.get("full_name") or candidate.get("full_name"),
         "headline": rec.get("headline"), "about": rec.get("summary"),
@@ -2192,21 +2332,27 @@ def _cs_heuristic_assess(rec: dict, candidate: dict, note: str = "") -> dict:
         "title": rec.get("active_experience_title") or candidate.get("title", ""),
         "headline": rec.get("headline") or ""})
     started = rec.get("experience_recently_started") or []
-    keyexp = _cs_exp_brief(exp, 5)
+    full = _cs_exp_brief(exp, 12)
+    prev = list(dict.fromkeys([e["company"] for e in full if e.get("company") and not e.get("current")]))
     months = rec.get("total_experience_duration_months") or 0
     return {"_source": "coresignal",
-            "summary": rec.get("summary") or rec.get("headline"),
+            "professional_summary": rec.get("summary") or rec.get("headline"),
+            "expertise": (rec.get("inferred_skills") or rec.get("skills") or [])[:12],
             "current_role": {"title": rec.get("active_experience_title"),
-                             "company": (keyexp[0]["company"] if keyexp else candidate.get("company_name"))},
+                             "company": (full[0]["company"] if full else candidate.get("company_name"))},
+            "career_history": [{"title": e["title"], "company": e["company"],
+                                "start": e["start"], "end": e["end"]} for e in full],
+            "previous_companies": prev[:12],
             "seniority_level": rec.get("active_experience_management_level") or candidate.get("seniority"),
             "department": rec.get("active_experience_department") or candidate.get("department"),
             "years_experience": (round(months / 12, 1) if months else None),
-            "top_skills": (rec.get("inferred_skills") or rec.get("skills") or [])[:8],
-            "key_experience": [{"title": e["title"], "company": e["company"],
-                                "start": e["start"], "end": e["end"]} for e in keyexp],
+            "top_skills": (rec.get("inferred_skills") or rec.get("skills") or [])[:12],
             "education": [{"institution": e.get("institution_name") or e.get("title"),
                            "degree": e.get("degree") or e.get("subtitle")}
-                          for e in (rec.get("education") or []) if isinstance(e, dict)][:4],
+                          for e in (rec.get("education") or []) if isinstance(e, dict)][:6],
+            "certifications": [{"title": c.get("title"), "issuer": c.get("issuer") or c.get("subtitle")}
+                               for c in (rec.get("certifications") or []) if isinstance(c, dict)][:8],
+            "languages": rec.get("languages"),
             "open_to_work": (score >= 65 or bool(started)),
             "intent_likelihood": score, "confidence": "medium",
             "signals": ([f"recently started role at {started[0].get('company_name')}"] if started else [])
@@ -2225,20 +2371,26 @@ def openai_coresignal_assess(candidate: dict, record: dict) -> dict:
         from openai import OpenAI
         client = OpenAI(api_key=_env("OPENAI_API_KEY"))
         payload = _cs_openai_payload(record, candidate)
-        sysmsg = ("You are an HR analyst producing a concise LinkedIn-based assessment of a known "
-                  "candidate from CoreSignal structured data. Use ONLY the provided fields — NEVER "
-                  "invent experience, skills, education, employers, or dates. If a field is absent, "
-                  "omit it or use null. Output STRICT JSON: "
-                  '{"summary":"<=45 words, only from provided data",'
+        sysmsg = ("You are an HR analyst producing a COMPREHENSIVE yet concise LinkedIn profile of a "
+                  "known candidate from CoreSignal structured data. Use ONLY the provided fields — NEVER "
+                  "invent experience, skills, education, employers, certifications, or dates. If a field "
+                  "is absent, omit it or use null/[]. Be thorough: include the FULL career history and all "
+                  "previous companies. Output STRICT JSON: "
+                  '{"professional_summary":"3-4 sentence professional bio from the data: who they are, '
+                  'where they work, their focus and standing",'
+                  '"expertise":["areas of expertise / specialties, broader than raw skills"],'
                   '"current_role":{"title":str,"company":str},'
+                  '"career_history":[{"title":str,"company":str,"start":str,"end":str,'
+                  '"focus":"<=12 word note on the role"}],'  # EVERY role provided, newest first
+                  '"previous_companies":["past employers, excluding the current one"],'
                   '"seniority_level":"intern|entry|manager|senior|director|vp|c_suite",'
                   '"department":"sales|marketing|seo|digital_marketing|engineering|other",'
                   '"years_experience":number,'
-                  '"top_skills":[str],"key_experience":[{"title":str,"company":str,"start":str,"end":str}],'
-                  '"education":[{"institution":str,"degree":str}],'
+                  '"top_skills":[str],"education":[{"institution":str,"degree":str}],'
+                  '"certifications":[{"title":str,"issuer":str}],"languages":[str],'
                   '"open_to_work":bool,"intent_likelihood":0-100,"confidence":"low|medium|high",'
                   '"signals":["short factual job-change signals from the data"],'
-                  '"recommendation":"<=20 words for the recruiter",'
+                  '"recommendation":"<=25 words for the recruiter",'
                   '"data_completeness":"low|medium|high"}')
         resp = client.chat.completions.create(
             model="gpt-4o-mini", temperature=0.2, response_format={"type": "json_object"},
@@ -2354,16 +2506,17 @@ def apollo_linkedin_lookup(candidate: dict) -> Optional[str]:
 
 
 def apollo_webhook_token() -> str:
-    """Stable secret for the Apollo async phone webhook. Uses APOLLO_WEBHOOK_SECRET if set,
-    else derives one from SECRET_KEY. Empty when neither is configured (then phone reveal is
-    skipped and only the synchronous email is returned)."""
+    """Stable secret for the Apollo async phone webhook. Uses APOLLO_WEBHOOK_SECRET, else
+    derives a token from SECRET_KEY or APP_PASSWORD (always set) so phone reveal works without
+    extra config. Empty only if literally nothing is configured."""
     t = _env("APOLLO_WEBHOOK_SECRET")
     if t:
         return t
-    sk = _env("SECRET_KEY")
-    if sk:
-        import hashlib
-        return hashlib.sha256(("apollo-phone:" + sk).encode()).hexdigest()[:32]
+    for src in ("SECRET_KEY", "APP_PASSWORD"):
+        sk = _env(src)
+        if sk:
+            import hashlib
+            return hashlib.sha256(("apollo-phone:" + sk).encode()).hexdigest()[:32]
     return ""
 
 
