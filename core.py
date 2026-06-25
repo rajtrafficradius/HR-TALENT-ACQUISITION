@@ -2264,6 +2264,21 @@ def enrich_coresignal(candidate_id: int, employee_id=None) -> dict:
                "match": {"confidence": "high", "method": "manual_pick", "id": employee_id}}
     else:
         res = coresignal_resolve(row)
+        # If name+company couldn't find a profile AND we have no LinkedIn URL, ask Apollo
+        # for the person's LinkedIn URL (no contact reveal), then retry the precise lookup.
+        via_apollo = False
+        if (not res.get("ok") and res.get("error") == "no_match" and not row.get("linkedin_url")
+                and _env("CORESIGNAL_APOLLO_LOOKUP", "1") == "1"):
+            url = apollo_linkedin_lookup(row)
+            if url:
+                row["linkedin_url"] = url
+                try:
+                    db.CandidateRepo.set_linkedin_url(candidate_id, url)
+                except Exception as e:
+                    log.warning("set_linkedin_url failed: %s", e)
+                res = coresignal_resolve(row)
+                via_apollo = res.get("ok", False)
+        res["_via_apollo"] = via_apollo
 
     if not res.get("ok"):
         out = {"ok": False, "error": res.get("error"), "credits_remaining": res.get("credits")}
@@ -2294,7 +2309,35 @@ def enrich_coresignal(candidate_id: int, employee_id=None) -> dict:
         scores_json=scores_json, overall=overall,
         linkedin_url=(resolved_url if _looks_like_linkedin(resolved_url) else None))
     return {"ok": True, "candidate": db.CandidateRepo.get(candidate_id), "assessment": assess,
-            "match": res.get("match"), "coresignal": cs_store, "credits_remaining": res.get("credits")}
+            "match": res.get("match"), "coresignal": cs_store, "credits_remaining": res.get("credits"),
+            "linkedin_via_apollo": bool(res.get("_via_apollo"))}
+
+
+def apollo_linkedin_lookup(candidate: dict) -> Optional[str]:
+    """ONE Apollo people/match WITHOUT revealing email/phone, purely to obtain the
+    person's LinkedIn URL so CoreSignal can do a precise (Branch A) profile lookup.
+    Many free-search candidates have no linkedin_url; a targeted match usually does.
+    Returns the URL or None. Never raises. (Uses an Apollo match, not a contact reveal.)"""
+    name = (candidate.get("full_name") or "").strip()
+    if not name:
+        return None
+    ap = get_apollo()
+    if not getattr(ap, "api_key", ""):
+        return None
+    parts = name.split()
+    first = parts[0]
+    last = " ".join(parts[1:]) if len(parts) > 1 else ""
+    try:
+        res = ap.enrich_person(first_name=first, last_name=last,
+                               domain=candidate.get("company_domain") or "",
+                               reveal_email=False, reveal_phone=False)
+    except Exception as e:
+        log.warning("apollo linkedin lookup failed: %s", e)
+        return None
+    if not res.get("_ok"):
+        return None
+    url = (res.get("person") or {}).get("linkedin_url")
+    return url or None
 
 
 def coresignal_status() -> dict:

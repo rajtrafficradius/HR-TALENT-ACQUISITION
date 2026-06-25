@@ -1124,6 +1124,18 @@ class CandidateRepo:
             conn.commit()
 
     @staticmethod
+    def set_linkedin_url(candidate_id: int, url: str) -> None:
+        """Light update of just the LinkedIn URL (used when Apollo resolves it for a
+        candidate that lacked one, so CoreSignal can do a precise profile lookup)."""
+        if not url:
+            return
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE candidates SET linkedin_url=%s WHERE id=%s",
+                            (url[:512], candidate_id))
+            conn.commit()
+
+    @staticmethod
     def set_status(candidate_id: int, status: str) -> None:
         with get_conn() as conn:
             with conn.cursor() as cur:

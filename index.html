@@ -483,7 +483,7 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
   const linkedinEnrich=async()=>{if(liBusy)return;setLiBusy(true);
     const r=await api('/api/coresignal-enrich/'+id,{method:'POST',body:JSON.stringify({})});
     setLiBusy(false);
-    if(r&&r.ok){toast('LinkedIn enriched via CoreSignal','ok');await load();onChanged&&onChanged();}
+    if(r&&r.ok){toast(r.linkedin_via_apollo?'Found LinkedIn via Apollo · enriched via CoreSignal':'LinkedIn enriched via CoreSignal','ok');await load();onChanged&&onChanged();}
     else if(r&&r.needs_manual_pick){toast('Multiple LinkedIn profiles match — open "LinkedIn Enrich" (top right) to pick the right one','bad');}
     else{const e=r&&r.error;toast(
       e==='not_configured'?'Set CORESIGNAL_API_KEY on Railway to enable this':
@@ -667,11 +667,11 @@ const FRESH=[['','Any time'],['7','Last 7 days'],['30','Last 30 days'],['90','La
 const SORTS=[['overall','Overall score'],['intent','Job-change intent'],['recent','Recently added'],['company_quality','Company quality'],['technical','Technical'],['role_fit','Role fit'],['freshness','Freshness']];
 function PeopleView({filters,setFilters,onPerson,refreshKey}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
-  const f=filters;
-  const load=useCallback(async()=>{setLoading(true);
+  const f=filters,reqId=useRef(0);
+  const load=useCallback(async()=>{const my=++reqId.current;setLoading(true);
     const q=new URLSearchParams({page,page_size:25});
     Object.entries(f).forEach(([k,v])=>{if(v!==''&&v!=null&&v!==0)q.set(k,v);});
-    const r=await api('/api/people?'+q.toString()); setData(r.rows?r:{rows:[],total:0,total_pages:1}); setLoading(false);},[f,page,refreshKey]);
+    const r=await api('/api/people?'+q.toString()); if(my!==reqId.current)return; setData(r.rows?r:{rows:[],total:0,total_pages:1}); setLoading(false);},[f,page,refreshKey]);
   useEffect(()=>{load();},[load]);
   useEffect(()=>{setPage(1);},[JSON.stringify(f)]);
   return <>
@@ -706,13 +706,14 @@ function CompaniesView({onCompany,meta}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
   const [f,setF]=useState({sort:'candidates',q:'',country:'',category:'',size_band:'',min_employees:0,max_employees:100000,min_quality:0});
   const cats=meta.categories||[]; const cc=meta.company_country_counts||{}; const sizes=meta.size_bands||SIZE_LABELS;
-  const load=useCallback(async()=>{setLoading(true);
+  const reqId=useRef(0);
+  const load=useCallback(async()=>{const my=++reqId.current;setLoading(true);
     const q=new URLSearchParams({page,page_size:25});
     Object.entries(f).forEach(([k,v])=>{
       if(k==='max_employees'&&(!v||v>=100000))return;
       if((k==='min_employees'||k==='min_quality')&&!v)return;
       if(v!==''&&v!=null)q.set(k,v);});
-    const r=await api('/api/companies?'+q.toString());setData(r.rows?r:{rows:[],total:0,total_pages:1});setLoading(false);},[f,page]);
+    const r=await api('/api/companies?'+q.toString());if(my!==reqId.current)return;setData(r.rows?r:{rows:[],total:0,total_pages:1});setLoading(false);},[f,page]);
   useEffect(()=>{load();},[load]); useEffect(()=>{setPage(1);},[JSON.stringify(f)]);
   const reset=()=>setF({sort:'candidates',q:'',country:'',category:'',size_band:'',min_employees:0,max_employees:100000,min_quality:0});
   return <div className="body"><div className="filters">
@@ -989,7 +990,7 @@ function LinkedInEnrichView({toast,onChanged,onPerson}){
     busyRef.current=false;setBusy(false);
     if(r&&r.credits_remaining!=null)setStatus(s=>({...(s||{}),credits_remaining:r.credits_remaining}));
     if(r&&r.ok){setResult(r);setPicks(null);if(r.candidate)setSel(r.candidate);
-      toast('CoreSignal LinkedIn enrichment complete','ok');onChanged&&onChanged();}
+      toast(r.linkedin_via_apollo?'Found LinkedIn via Apollo · enriched via CoreSignal':'CoreSignal LinkedIn enrichment complete','ok');onChanged&&onChanged();}
     else if(r&&r.needs_manual_pick){setPicks(r.candidates||[]);
       setMsg({kind:'info',text:'Multiple LinkedIn profiles match — pick the correct person below.'});}
     else{const e=r&&r.error;setMsg({kind:'bad',text:
@@ -1089,11 +1090,11 @@ function App(){
         title="Manually enrich a candidate via CoreSignal LinkedIn data">
         <span className="li-ic">in</span><span>LinkedIn Enrich</span></button>
       <div className="kpis">
-        <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf({sort:'intent',open_to_shift:'1'});}} title="View all candidates">
+        <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf(p=>({sort:p.sort||'overall'}));}} title="View all candidates">
           <div className="v">{stats.candidates_total??'—'}</div><div className="l">Candidates</div></div>
-        <div className="kpi kpi-btn open" onClick={()=>{setTab('people');setPf({sort:'intent',open_to_shift:'1'});}} title="Show only open-to-shift candidates">
+        <div className="kpi kpi-btn open" onClick={()=>{setTab('people');setPf(p=>({...p,open_to_shift:'1'}));}} title="Show only open-to-shift candidates">
           <div className="v am">{stats.open_to_shift??'—'}{stats.open_to_shift_li!=null&&<span className="liv" title="Verified via LinkedIn (CoreSignal)"> ({stats.open_to_shift_li})</span>}</div><div className="l">Open to shift ▸</div></div>
-        <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf({sort:'overall',enrichment_status:'any_enriched'});}} title="Show enriched candidates">
+        <div className="kpi kpi-btn" onClick={()=>{setTab('people');setPf(p=>({...p,enrichment_status:'any_enriched'}));}} title="Show enriched candidates">
           <div className="v">{stats.enriched??'—'}</div><div className="l">Enriched</div></div>
         <div className="kpi kpi-btn" onClick={()=>setTab('companies')} title="View companies">
           <div className="v">{stats.companies_total??'—'}</div><div className="l">Companies</div></div></div>
