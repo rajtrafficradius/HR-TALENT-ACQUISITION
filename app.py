@@ -321,7 +321,34 @@ def api_person(cid):
     if not cand:
         return jsonify({"error": "not_found"}), 404
     company = db.CompanyRepo.get(cand["company_id"]) if cand.get("company_id") else None
-    return jsonify({"candidate": cand, "company": company,
+    if company and not company.get("industry"):
+        company["industry_derived"] = core.derive_industry(company["id"])
+
+    # Interconnected web: resolve this person's PAST companies to DB rows (clickable).
+    # employment_history only exists for Apollo-enriched candidates.
+    past_companies = []
+    eh = cand.get("employment_history_json") or []
+    if isinstance(eh, list) and eh:
+        cur_key = (company or {}).get("company_key") or core.company_key_for(cand.get("company_name") or "")
+        pairs = []
+        for e in eh:
+            if not isinstance(e, dict):
+                continue
+            nm = e.get("organization_name")
+            if not nm:
+                continue
+            key = core.company_key_for(nm)
+            if e.get("current") or not key or key == cur_key:
+                continue  # skip the current employer (already shown above)
+            pairs.append((e, key))
+        idmap = db.CompanyRepo.ids_by_keys([k for _, k in pairs]) if pairs else {}
+        for e, key in pairs:
+            past_companies.append({
+                "name": e.get("organization_name"), "title": e.get("title"),
+                "start_date": e.get("start_date"), "end_date": e.get("end_date"),
+                "current": bool(e.get("current")), "company_id": idmap.get(key)})
+
+    return jsonify({"candidate": cand, "company": company, "past_companies": past_companies,
                     "enrichment_log": db.EnrichmentLogRepo.for_candidate(cid)})
 
 
@@ -347,6 +374,8 @@ def api_company(coid):
     company = db.CompanyRepo.get(coid)
     if not company:
         return jsonify({"error": "not_found"}), 404
+    if not company.get("industry"):
+        company["industry_derived"] = core.derive_industry(coid)
     return jsonify({"company": company, "people": db.CandidateRepo.for_company(coid)})
 
 

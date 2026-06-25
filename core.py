@@ -513,6 +513,28 @@ GROUPS: Dict[str, List[str]] = {}
 for _c in CATEGORIES:
     GROUPS.setdefault(_c["group"], []).append(_c["label"])
 GROUP_ORDER = list(GROUPS.keys())
+CATEGORY_GROUP = {label: g for g, labels in GROUPS.items() for label in labels}
+# human "industry" label per group — used as a FREE fallback when Apollo has no industry
+GROUP_INDUSTRY = {
+    "SEO": "SEO / Search Marketing",
+    "Paid & Performance": "Performance / Paid Media",
+    "Marketing & Content": "Digital Marketing & Content",
+    "Creative & Web": "Creative & Web Development",
+    "Sales & Ops": "Sales & Business Development",
+    "People": "HR & Recruiting",
+}
+
+
+def derive_industry(company_id: int) -> Optional[str]:
+    """Infer a company's industry FREE from the categories of its own candidates
+    (used only when Apollo has no real industry). Returns a label or None."""
+    try:
+        cat = db.CandidateRepo.dominant_category(company_id)
+    except Exception:
+        return None
+    if not cat:
+        return None
+    return GROUP_INDUSTRY.get(CATEGORY_GROUP.get(cat, ""), None)
 
 
 def classify_category(title: str = "", headline: str = "") -> Optional[str]:
@@ -1485,6 +1507,62 @@ def roster_sync_batch(limit: int = 4, logf=None) -> Tuple[int, int]:
     return total, len(companies)
 
 
+_web_limiter = RateLimiter(1.0)
+
+
+def fetch_company_web(domain: str) -> dict:
+    """Best-effort FREE fetch of a company homepage → {description, og_image}. Never
+    raises. Extracts og:description / meta description / <title>."""
+    import html as _html
+    if not domain:
+        return {}
+    try:
+        _web_limiter.wait()
+        r = requests.get("https://" + domain,
+                         headers={"User-Agent": _LI_UA, "Accept-Language": "en-US,en"},
+                         timeout=10, allow_redirects=True)
+    except Exception:
+        return {}
+    if r.status_code != 200:
+        return {}
+    h = r.text[:200000]
+
+    def _prop(p):
+        m = re.search(r'<meta\s+property="' + re.escape(p) + r'"\s+content="([^"]*)"', h, re.I)
+        return _html.unescape(m.group(1).strip()) if m else None
+
+    def _name(p):
+        m = re.search(r'<meta\s+name="' + re.escape(p) + r'"\s+content="([^"]*)"', h, re.I)
+        return _html.unescape(m.group(1).strip()) if m else None
+
+    title = None
+    mt = re.search(r"<title[^>]*>(.*?)</title>", h, re.S | re.I)
+    if mt:
+        title = _html.unescape(re.sub(r"\s+", " ", mt.group(1)).strip())
+    desc = _prop("og:description") or _name("description") or title
+    if desc:
+        desc = desc[:280]
+    img = _prop("og:image")
+    return {"description": desc, "og_image": (img[:512] if img else None)}
+
+
+def enrich_company_web(limit: int = 20, logf=None) -> int:
+    """Paced FREE homepage 'About' enricher (mirrors backfill_company_domains)."""
+    rows = db.CompanyRepo.web_pending(limit)
+    n = 0
+    for r in rows:
+        info = fetch_company_web(r.get("root_domain") or "")
+        try:
+            db.CompanyRepo.set_web(r["id"], info.get("description"), info.get("og_image"))
+            if info.get("description"):
+                n += 1
+        except Exception as e:
+            log.warning("set_web failed for %s: %s", r.get("id"), e)
+    if logf and rows:
+        logf(f"Web enrich: {n}/{len(rows)} described")
+    return n
+
+
 def cleanup_irrelevant_companies(limit: int = 5000) -> int:
     """Delete existing companies (and their candidates) that fail the relevance filter
     (banks, govt, healthcare, etc.). One-time/periodic housekeeping."""
@@ -1863,6 +1941,13 @@ def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
                 backfill_company_domains(_env_int("HUNT_DOMAIN_BACKFILL_PER_TICK", 40))
             except Exception as e:
                 log.warning("domain backfill error: %s", e)
+
+            # Progressively pull each company's homepage 'About' (free), paced.
+            if _env("HR_WEB_ENRICH_ENABLED", "1") == "1":
+                try:
+                    enrich_company_web(_env_int("HUNT_WEB_ENRICH_PER_TICK", 20))
+                except Exception as e:
+                    log.warning("web enrich error: %s", e)
 
             # Roster verifier (separate toggle): pull each company's FULL employee
             # roster from Apollo so none are missing. Only when the user enables it.

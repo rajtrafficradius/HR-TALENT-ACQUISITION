@@ -291,6 +291,9 @@ _SCHEMA_SQL: Sequence[str] = (
         company_quality_score TINYINT UNSIGNED NOT NULL DEFAULT 0,
         enriched              TINYINT(1) NOT NULL DEFAULT 0,
         domain_checked        TINYINT(1) NOT NULL DEFAULT 0,
+        web_checked           TINYINT(1) NOT NULL DEFAULT 0,
+        description           TEXT NULL,
+        og_image              VARCHAR(512) NULL,
         roster_synced_at      DATETIME NULL,
         roster_count          INT NOT NULL DEFAULT 0,
         source                ENUM('apollo','seed','g2','clutch','manual') NOT NULL DEFAULT 'apollo',
@@ -431,8 +434,12 @@ _MIGRATIONS = (
     ("companies", "roster_synced_at", "ALTER TABLE companies ADD COLUMN roster_synced_at DATETIME NULL"),
     ("companies", "roster_count", "ALTER TABLE companies ADD COLUMN roster_count INT NOT NULL DEFAULT 0"),
     ("candidates", "linkedin_enriched", "ALTER TABLE candidates ADD COLUMN linkedin_enriched TINYINT(1) NOT NULL DEFAULT 0"),
+    ("companies", "web_checked", "ALTER TABLE companies ADD COLUMN web_checked TINYINT(1) NOT NULL DEFAULT 0"),
+    ("companies", "description", "ALTER TABLE companies ADD COLUMN description TEXT NULL"),
+    ("companies", "og_image", "ALTER TABLE companies ADD COLUMN og_image VARCHAR(512) NULL"),
 )
 _MIGRATION_INDEXES = (
+    ("companies", "idx_company_webchk", "ALTER TABLE companies ADD KEY idx_company_webchk (web_checked)"),
     ("companies", "idx_company_roster", "ALTER TABLE companies ADD KEY idx_company_roster (roster_synced_at)"),
     ("candidates", "idx_cand_li", "ALTER TABLE candidates ADD KEY idx_cand_li (linkedin_enriched)"),
     ("companies", "idx_company_country", "ALTER TABLE companies ADD KEY idx_company_country (country)"),
@@ -677,6 +684,42 @@ class CompanyRepo:
             conn.commit()
 
     @staticmethod
+    def web_pending(limit: int = 40) -> List[dict]:
+        """Companies with a domain but no homepage 'About' fetched yet (rostered first)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name, root_domain FROM companies "
+                    "WHERE root_domain IS NOT NULL AND web_checked=0 "
+                    "ORDER BY roster_count DESC, id DESC LIMIT %s", (limit,))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def set_web(company_id: int, description: Optional[str], og_image: Optional[str]) -> None:
+        # Defensive length caps: og_image is VARCHAR(512); an over-length value would
+        # raise DataError under STRICT mode, aborting the UPDATE (web_checked never set).
+        og_image = og_image[:512] if og_image else None
+        description = description if description else None
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET description=COALESCE(%s,description), "
+                            "og_image=COALESCE(%s,og_image), web_checked=1, last_verified_at=NOW() "
+                            "WHERE id=%s", (description, og_image, company_id))
+            conn.commit()
+
+    @staticmethod
+    def ids_by_keys(keys) -> Dict[str, int]:
+        """Resolve many company_keys → ids in one round-trip (for the interconnected web)."""
+        keys = list(dict.fromkeys(k for k in keys if k))  # dedupe, drop empties
+        if not keys:
+            return {}
+        ph = ",".join(["%s"] * len(keys))
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT company_key, id FROM companies WHERE company_key IN ({ph})", keys)
+                return {r["company_key"]: int(r["id"]) for r in (cur.fetchall() or [])}
+
+    @staticmethod
     def roster_pending(limit: int = 5) -> List[dict]:
         """Companies whose full employee roster hasn't been synced yet. Domain-having
         companies first (precise search), then by how many candidates they already have."""
@@ -804,8 +847,8 @@ class CompanyRepo:
                 total = int(cur.fetchone()["c"])
                 cur.execute(
                     "SELECT id, name, company_key, root_domain, website_url, linkedin_url, "
-                    "industry, estimated_employees, size_band, size_min, size_max, "
-                    "annual_revenue, founded_year, hq_country, "
+                    "industry, description, estimated_employees, size_band, size_min, size_max, "
+                    "annual_revenue, founded_year, hq_city, hq_country, roster_count, "
                     "country, company_quality_score, enriched, source, discovered_at, last_verified_at, "
                     "(SELECT COUNT(*) FROM candidates c WHERE c.company_id=companies.id) "
                     "AS candidate_count, "
@@ -1120,6 +1163,17 @@ class CandidateRepo:
                 cur.execute("SELECT DISTINCT category FROM candidates "
                             "WHERE category IS NOT NULL AND category<>'' ORDER BY category")
                 return [r["category"] for r in (cur.fetchall() or [])]
+
+    @staticmethod
+    def dominant_category(company_id: int) -> Optional[str]:
+        """Most common category among a company's candidates (for derived industry)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT category, COUNT(*) AS n FROM candidates "
+                            "WHERE company_id=%s AND category IS NOT NULL AND category<>'' "
+                            "GROUP BY category ORDER BY n DESC LIMIT 1", (company_id,))
+                row = cur.fetchone()
+        return row["category"] if row else None
 
     @staticmethod
     def companies_for_filter(limit: int = 500) -> List[dict]:

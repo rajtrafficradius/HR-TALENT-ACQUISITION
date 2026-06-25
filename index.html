@@ -166,6 +166,7 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .cell-sub{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--t4);margin-bottom:3px}
 .cell-co{min-width:0}
 .cell-co .cn{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.cd{font-family:var(--mono);font-size:11px;color:var(--t3);text-decoration:none}
 .cell-co .cd{font-family:var(--mono);font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* tags & badges */
@@ -253,6 +254,12 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .tl-item .tt{font-size:13.5px;font-weight:600}
 .tl-item .to{color:var(--t2);font-size:12.5px}
 .tl-item .td{font-family:var(--mono);font-size:11px;color:var(--t3);margin-top:2px}
+.tl-item.link:hover .tt{color:var(--amber)}
+.tl-item.link::before{background:var(--amber-dim);border-color:var(--amber-dim)}
+.added-box{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--amber-soft);
+  border:1px solid var(--amber-dim);border-radius:var(--rad);padding:10px 14px;margin-bottom:14px}
+.added-box .ab-time{font-family:var(--mono);font-size:13px;color:var(--amber);margin-top:4px}
+.added-box .ab-ago{font-family:var(--mono);font-size:11px;color:var(--t3);white-space:nowrap}
 .evid{display:flex;gap:10px;flex-wrap:wrap}
 .evid .ev{flex:1;min-width:120px;background:#0d0d10;border:1px solid var(--line);border-radius:var(--rad);padding:12px 14px}
 .evid .ev .en{font-family:var(--disp);font-weight:700;font-size:24px;color:var(--amber);line-height:1}
@@ -334,8 +341,15 @@ const titleCase=s=>(s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())
 function scoreColor(v){v=+v||0; if(v>=75)return'var(--amber)'; if(v>=55)return'#cdd0d4'; if(v>=40)return'#86867f'; return'#54544f';}
 function fmtNum(n){ if(n==null)return'—'; if(n>=1e9)return(n/1e9).toFixed(1)+'B'; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'k'; return''+n; }
 function fmtDate(s){ if(!s)return'—'; try{return new Date(s).toLocaleDateString(undefined,{day:'2-digit',month:'short',year:'numeric'})}catch(e){return s} }
-function timeago(s){ if(!s)return'—'; try{const d=(Date.now()-new Date(s+(s.endsWith('Z')?'':'Z')).getTime())/1000;
+function timeago(s){ if(!s)return'—'; try{const hasTz=/[zZ]$|[+-]\d\d:?\d\d$|GMT|UTC/.test(s); const t=new Date(hasTz?s:s+'Z').getTime(); if(isNaN(t))return'—'; const d=(Date.now()-t)/1000;
   if(d<60)return'just now'; if(d<3600)return Math.floor(d/60)+'m ago'; if(d<86400)return Math.floor(d/3600)+'h ago'; return Math.floor(d/86400)+'d ago';}catch(e){return s} }
+function fmtDateTime(s){ if(!s)return'—'; try{return new Date(s).toLocaleString(undefined,{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}catch(e){return s} }
+function logoUrl(domain){ return domain?('https://logo.clearbit.com/'+domain):null; }
+function Logo({domain,name,size=26}){ if(!domain)return null;
+  return <img src={logoUrl(domain)} alt={name||''} title={name||''} loading="lazy" referrerPolicy="no-referrer"
+    onError={e=>{e.target.style.display='none';}}
+    style={{width:size,height:size,borderRadius:6,objectFit:'contain',background:'#fff',
+      border:'1px solid var(--line2)',flex:'none',padding:2}}/>; }
 
 /* ── tiny components ─────────────────────────────── */
 function Gauge({label,value}){
@@ -382,7 +396,7 @@ function ScoreBlock({c}){
 }
 
 /* ── Person drawer ───────────────────────────────── */
-function PersonDrawer({id,onClose,onChanged,toast}){
+function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
   const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(false),[liBusy,setLiBusy]=useState(false);
   const load=useCallback(async()=>{const r=await api('/api/people/'+id); if(r.candidate)setD(r);},[id]);
   useEffect(()=>{setD(null);load();},[id,load]);
@@ -483,22 +497,38 @@ function PersonDrawer({id,onClose,onChanged,toast}){
           <div className="td">{(j.start_date||'?')+' — '+(j.current?'Present':(j.end_date||'?'))}</div></div>)}</div></div>}
 
       {co&&<div className="sect"><div className="sect-h">Company</div>
+        <div style={{display:'flex',gap:11,alignItems:'center',marginBottom:11}}>
+          <Logo domain={co.root_domain} name={co.name} size={32}/>
+          <div style={{minWidth:0}}>
+            <div className="v" style={{fontWeight:600,fontSize:14,cursor:(onCompany&&co.id)?'pointer':'default'}} onClick={()=>onCompany&&co.id&&onCompany(co.id)}>{co.name}{(onCompany&&co.id)?' ↗':''}</div>
+            {co.root_domain&&<a className="cd" href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain}</a>}</div></div>
+        {co.description&&<div className="blurb" style={{fontStyle:'normal',marginBottom:11}}>{co.description}</div>}
         <div className="sgrid">
-          <div className="kv"><span className="k">Name</span><span className="v">{co.name}</span></div>
-          <div className="kv"><span className="k">Website</span><span className="v">{co.root_domain?<a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain}</a>:'—'}</span></div>
-          <div className="kv"><span className="k">Company size</span><span className="v">{co.size_band||'—'}</span></div>
-          <div className="kv"><span className="k">Employees</span><span className="v">{fmtNum(co.estimated_employees)}</span></div>
+          <div className="kv"><span className="k">Industry</span><span className="v">{co.industry||(co.industry_derived?(co.industry_derived+' · inferred'):'—')}</span></div>
+          <div className="kv"><span className="k">Company size</span><span className="v">{co.size_band||'—'}{(co.size_min!=null&&co.size_max!=null)?` (${fmtNum(co.size_min)}–${fmtNum(co.size_max)})`:''}</span></div>
           <div className="kv"><span className="k">Quality</span><span className="v" style={{color:scoreColor(co.company_quality_score)}}>{co.company_quality_score}</span></div>
-          <div className="kv"><span className="k">Region</span><span className="v">{co.country||co.hq_country||'—'}</span></div>
+          <div className="kv"><span className="k">Region</span><span className="v">{[co.hq_city,co.country||co.hq_country].filter(Boolean).join(', ')||'—'}</span></div>
         </div></div>}
 
       <div className="sect"><div className="sect-h">Provenance</div>
+        <div className="added-box"><div><div className="kicker">Added to database</div>
+          <div className="ab-time">{fmtDateTime(c.discovered_at)}</div></div>
+          <div className="ab-ago">{timeago(c.discovered_at)}</div></div>
         <div className="sgrid">
           <div className="kv"><span className="k">Source</span><span className="v">{c.source}</span></div>
           <div className="kv"><span className="k">Confidence</span><span className="v">{c.confidence}%</span></div>
-          <div className="kv"><span className="k">Discovered</span><span className="v">{fmtDate(c.discovered_at)}</span></div>
-          <div className="kv"><span className="k">Last verified</span><span className="v">{fmtDate(c.last_verified_at)}</span></div>
+          <div className="kv"><span className="k">Discovered</span><span className="v">{fmtDateTime(c.discovered_at)}</span></div>
+          <div className="kv"><span className="k">Last verified</span><span className="v">{fmtDateTime(c.last_verified_at)}</span></div>
         </div></div>
+
+      {(()=>{const pc=(d.past_companies||[]).filter(p=>!p.current);return (pc.length>0||!enriched)?(
+        <div className="sect"><div className="sect-h">Interconnected · Past companies</div>
+          {pc.length>0?<div className="timeline">{pc.map((p,i)=>{const clk=!!p.company_id;return(
+            <div key={i} className={cls('tl-item',clk&&'link')} onClick={clk?()=>onCompany&&onCompany(p.company_id):undefined} style={clk?{cursor:'pointer'}:undefined}>
+              <div className="tt">{p.name}{clk?' ↗':''}</div><div className="to">{p.title||''}</div>
+              <div className="td">{(p.start_date||'?')+' — '+(p.current?'Present':(p.end_date||'?'))}{clk?'':' · not in database'}</div></div>);})}</div>
+          :<div style={{color:'var(--t3)',fontSize:12.5}}>Enrich via Apollo to map this person's past companies.</div>}
+        </div>):null;})()}
     </div></div>;
 }
 
@@ -511,23 +541,27 @@ function CompanyDrawer({id,onClose,onPerson}){
     <div className="dbody"><div className="empty"><span className="spin"/></div></div></div>;
   const co=d.company,ppl=d.people||[];
   return <div className="drawer">
-    <div className="dhead"><div className="top"><div>
-      <h2>{co.name}</h2><div className="role mono">{co.root_domain?
-        <a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain} ↗</a>:'website pending…'}</div></div>
+    <div className="dhead"><div className="top"><div style={{display:'flex',gap:13,alignItems:'center',minWidth:0}}>
+      <Logo domain={co.root_domain} name={co.name} size={40}/>
+      <div style={{minWidth:0}}><h2>{co.name}</h2><div className="role mono">{co.root_domain?
+        <a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain} ↗</a>:'website pending…'}</div></div></div>
       <button className="iconbtn" onClick={onClose}>✕</button></div>
       <div className="dmeta">{co.size_band&&<span className="tag">{co.size_band}</span>}
         {co.country&&<span className="tag">{co.country}</span>}
-        {co.industry&&<span className="tag">{co.industry}</span>}</div></div>
+        {(co.industry||co.industry_derived)&&<span className="tag">{co.industry||co.industry_derived}{!co.industry&&co.industry_derived?' · inferred':''}</span>}</div></div>
     <div className="dbody">
       <div className="sect"><div className="sect-h">Firmographics</div>
         <div className="scorebig" style={{marginBottom:16}}><Ring value={co.company_quality_score}/>
           <div><div className="kicker">Company quality</div>
           <div style={{fontFamily:'var(--disp)',fontWeight:600,fontSize:15,marginTop:2}}>{co.size_band||(fmtNum(co.estimated_employees)+' employees')}</div></div></div>
+        {co.description&&<div className="blurb" style={{fontStyle:'normal',marginBottom:14}}>{co.description}</div>}
         <div className="sgrid">
           <div className="kv"><span className="k">Website</span><span className="v">{co.root_domain?<a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener">{co.root_domain} ↗</a>:'pending…'}</span></div>
-          <div className="kv"><span className="k">Company size</span><span className="v">{co.size_band||'—'}{co.estimated_employees?` · ~${fmtNum(co.estimated_employees)}`:''}</span></div>
-          <div className="kv"><span className="k">Region</span><span className="v">{co.country||co.hq_country||'—'}</span></div>
-          <div className="kv"><span className="k">Industry</span><span className="v">{co.industry||'—'}</span></div>
+          <div className="kv"><span className="k">Industry</span><span className="v">{co.industry||(co.industry_derived?(co.industry_derived+' · inferred'):'—')}</span></div>
+          <div className="kv"><span className="k">Company size</span><span className="v">{co.size_band||'—'}{(co.size_min!=null&&co.size_max!=null)?` (${fmtNum(co.size_min)}–${fmtNum(co.size_max)})`:(co.estimated_employees?` · ~${fmtNum(co.estimated_employees)}`:'')}</span></div>
+          <div className="kv"><span className="k">Employees tracked</span><span className="v">{co.roster_count||0}</span></div>
+          <div className="kv"><span className="k">Region</span><span className="v">{[co.hq_city,co.country||co.hq_country].filter(Boolean).join(', ')||'—'}</span></div>
+          <div className="kv"><span className="k">LinkedIn</span><span className="v">{co.linkedin_url?<a href={co.linkedin_url} target="_blank" rel="noopener">company ↗</a>:'—'}</span></div>
           <div className="kv"><span className="k">Revenue</span><span className="v">{co.annual_revenue?('$'+fmtNum(co.annual_revenue)):'—'}</span></div>
           <div className="kv"><span className="k">Founded</span><span className="v">{co.founded_year||'—'}</span></div>
         </div></div>
@@ -542,7 +576,7 @@ function CompanyDrawer({id,onClose,onPerson}){
 
 /* ── People view ─────────────────────────────────── */
 const FRESH=[['','Any time'],['7','Last 7 days'],['30','Last 30 days'],['90','Last 90 days']];
-const SORTS=[['overall','Overall score'],['intent','Job-change intent'],['company_quality','Company quality'],['technical','Technical'],['role_fit','Role fit'],['freshness','Freshness'],['recent','Most recent']];
+const SORTS=[['overall','Overall score'],['intent','Job-change intent'],['recent','Recently added'],['company_quality','Company quality'],['technical','Technical'],['role_fit','Role fit'],['freshness','Freshness']];
 function PeopleView({filters,setFilters,onPerson,refreshKey}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
   const f=filters;
@@ -620,8 +654,10 @@ function CompaniesView({onCompany,meta}){
       data.rows.length===0?<div className="empty"><div className="big">No companies match</div>
         <div>Widen the size range or region, or turn on Auto-hunt in Discovery.</div></div>:
       <div className="rows">{data.rows.map(co=><div key={co.id} className="row row-co" onClick={()=>onCompany(co.id)}>
-        <div className="cell-co"><div className="cn" style={{fontSize:14.5}}>{co.name}</div>
-          <div className="cd">{co.root_domain?<a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}>{co.root_domain}</a>:'website pending…'}</div></div>
+        <div className="cell-co" style={{display:'flex',gap:11,alignItems:'center',minWidth:0}}>
+          <Logo domain={co.root_domain} name={co.name} size={30}/>
+          <div style={{minWidth:0}}><div className="cn" style={{fontSize:14.5}}>{co.name}</div>
+            <div className="cd">{co.root_domain?<a href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()}>{co.root_domain}</a>:'website pending…'}</div></div></div>
         <div className="col-hide"><div className="cell-sub">Size</div><div style={{fontSize:12,color:'var(--t2)'}}>{co.size_band||'—'}</div>
           <div className="cd">{co.country||co.hq_country||''}</div></div>
         <div style={{display:'flex',gap:16,alignItems:'center'}}>
@@ -837,7 +873,7 @@ function App(){
     {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast} meta={meta}/></div>}
 
     {person&&<><div className="scrim" onClick={()=>setPerson(null)}/>
-      <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast}/></>}
+      <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast} onCompany={(coid)=>{setPerson(null);setCompany(coid);}}/></>}
     {company&&<><div className="scrim" onClick={()=>setCompany(null)}/>
       <CompanyDrawer id={company} onClose={()=>setCompany(null)} onPerson={(pid)=>{setCompany(null);setPerson(pid);}}/></>}
     {toast&&<div className={cls('toast',toast.k)}>{toast.k==='ok'?'✓':'⚠'} {toast.m}</div>}
