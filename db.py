@@ -1124,6 +1124,21 @@ class CandidateRepo:
             conn.commit()
 
     @staticmethod
+    def set_phone_by_apollo_id(apollo_person_id: str, phone: str) -> bool:
+        """Write a phone delivered by Apollo's async webhook onto the matching candidate
+        (by apollo_person_id), without overwriting an existing number. Returns True if a row
+        was updated."""
+        if not (apollo_person_id and phone):
+            return False
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE candidates SET phone=%s WHERE apollo_person_id=%s "
+                            "AND (phone IS NULL OR phone='')", (phone[:64], apollo_person_id))
+                n = cur.rowcount
+            conn.commit()
+        return n > 0
+
+    @staticmethod
     def set_linkedin_url(candidate_id: int, url: str) -> None:
         """Light update of just the LinkedIn URL (used when Apollo resolves it for a
         candidate that lacked one, so CoreSignal can do a precise profile lookup)."""

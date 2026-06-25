@@ -478,7 +478,7 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
     const r=await api('/api/enrich/'+id,{method:'POST',body:JSON.stringify({reveal_email:rE,reveal_phone:rP})});
     setBusy(false);
     if(r.__status===409&&r.error==='no_credits'){toast('Apollo credits exhausted — reveal unavailable','bad');}
-    else if(r.ok){toast(r.cached?'Already enriched':'Enriched · contact revealed','ok');await load();onChanged&&onChanged();}
+    else if(r.ok){toast(r.cached?'Already enriched':(r.phone_pending?'Enriched · email revealed · phone arriving (~few min, refresh)':'Enriched · email revealed'),'ok');await load();onChanged&&onChanged();}
     else{toast('Enrichment failed','bad');await load();}};
   const linkedinEnrich=async()=>{if(liBusy)return;setLiBusy(true);
     const r=await api('/api/coresignal-enrich/'+id,{method:'POST',body:JSON.stringify({})});
@@ -566,7 +566,7 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
             <a className="cv" href={co.website_url||('https://'+co.root_domain)} target="_blank" rel="noopener" style={{flex:1}}>{co.root_domain||co.website_url}</a></div>}
           {!enriched&&<div className="enrich-ctl">
             <label className="chk"><input type="checkbox" checked={rE} onChange={e=>setRE(e.target.checked)}/>Email</label>
-            <label className="chk"><input type="checkbox" checked={rP} onChange={e=>setRP(e.target.checked)}/>Phone <span style={{color:'var(--t4)'}}>(more credits)</span></label>
+            <label className="chk"><input type="checkbox" checked={rP} onChange={e=>setRP(e.target.checked)}/>Phone <span style={{color:'var(--t4)'}}>(async · arrives in a few min)</span></label>
             <button className="btn btn-primary btn-sm" disabled={busy||(!rE&&!rP)} onClick={enrich}>
               {busy?<span className="spin"/>:'⚡ Enrich via Apollo'}</button></div>}
           {enriched&&<div style={{marginTop:10,fontFamily:'var(--mono)',fontSize:10.5,color:'var(--t3)',letterSpacing:'.05em'}}>

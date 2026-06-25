@@ -170,16 +170,19 @@ class ApolloClient:
 
     def enrich_person(self, *, apollo_id: str = "", first_name: str = "", last_name: str = "",
                       domain: str = "", linkedin_url: str = "", reveal_email: bool = True,
-                      reveal_phone: bool = False) -> dict:
-        """Paid people/match reveal. Returns a structured dict with _ok / _no_credits /
-        _http_status / email / phone / employment_history. Retries once WITHOUT reveal
-        flags on 400/422 (still returns employment_history cheaply)."""
+                      reveal_phone: bool = False, webhook_url: str = "") -> dict:
+        """Paid people/match reveal. The EMAIL is returned synchronously in this response.
+        The PHONE is async: Apollo requires a webhook_url and delivers the number to it
+        minutes later (never in this response) — so we only request phone when a webhook_url
+        is provided, and on a non-credits 400/422 we drop ONLY the phone reveal and retry,
+        so the synchronous email is never lost. Matching is most reliable by apollo_id."""
         url = f"{self.BASE_URL}/people/match"
         payload: Dict[str, Any] = {}
         if reveal_email:
             payload["reveal_personal_emails"] = True
-        if reveal_phone:
+        if reveal_phone and webhook_url:  # phone is webhook-only; never send it without one
             payload["reveal_phone_number"] = True
+            payload["webhook_url"] = webhook_url
         if apollo_id:
             payload["id"] = apollo_id
         if first_name:
@@ -193,15 +196,22 @@ class ApolloClient:
 
         resp = self._post(url, payload)
         retried = False
-        if resp is not None and resp.status_code in (400, 422):
+        # On a non-credits 400/422, first drop the phone reveal (the usual cause — its
+        # webhook), KEEPING the email reveal; if it still fails, drop email too for the
+        # base record. Never lose the synchronous email just because phone failed.
+        for _ in range(2):
+            if resp is None or resp.status_code not in (400, 422):
+                break
             body = resp.text[:300]
             if "insufficient credits" in body.lower():
                 if not self._logged_match_error:
                     self._logged_match_error = True
                     log.error("Apollo EXPORT CREDITS EXHAUSTED: %s", body)
                 return {"_ok": False, "_no_credits": True, "_http_status": resp.status_code}
-            payload.pop("reveal_phone_number", None)
-            payload.pop("reveal_personal_emails", None)
+            if payload.pop("reveal_phone_number", None) is not None:
+                payload.pop("webhook_url", None)
+            elif payload.pop("reveal_personal_emails", None) is None:
+                break  # nothing left to strip
             resp = self._post(url, payload)
             retried = True
 
@@ -1779,7 +1789,7 @@ def cleanup_irrelevant_companies(limit: int = 5000) -> int:
 
 
 def enrich_candidate(candidate_id: int, reveal_email: bool = True,
-                     reveal_phone: bool = False) -> dict:
+                     reveal_phone: bool = False, webhook_url: str = "") -> dict:
     """Reveal contact info for ONE candidate via Apollo people/match, then recompute
     intent with the now-available employment_history. Caller must have already
     transitioned status → 'enriching' (db.CandidateRepo.set_enriching)."""
@@ -1804,7 +1814,7 @@ def enrich_candidate(candidate_id: int, reveal_email: bool = True,
         apollo_id=row.get("apollo_person_id") or "",
         first_name=row.get("first_name") or "", last_name=row.get("last_name") or "",
         domain=row.get("company_domain") or "", linkedin_url=row.get("linkedin_url") or "",
-        reveal_email=reveal_email, reveal_phone=reveal_phone)
+        reveal_email=reveal_email, reveal_phone=reveal_phone, webhook_url=webhook_url)
 
     log_entry = {"candidate_id": candidate_id, "apollo_person_id": row.get("apollo_person_id"),
                  "reveal_email": reveal_email, "reveal_phone": reveal_phone,
@@ -2328,7 +2338,10 @@ def apollo_linkedin_lookup(candidate: dict) -> Optional[str]:
     first = parts[0]
     last = " ".join(parts[1:]) if len(parts) > 1 else ""
     try:
-        res = ap.enrich_person(first_name=first, last_name=last,
+        # Match by apollo_person_id when available — name+domain alone does NOT resolve the
+        # exact person (Apollo returns an empty match with no linkedin_url).
+        res = ap.enrich_person(apollo_id=candidate.get("apollo_person_id") or "",
+                               first_name=first, last_name=last,
                                domain=candidate.get("company_domain") or "",
                                reveal_email=False, reveal_phone=False)
     except Exception as e:
@@ -2338,6 +2351,48 @@ def apollo_linkedin_lookup(candidate: dict) -> Optional[str]:
         return None
     url = (res.get("person") or {}).get("linkedin_url")
     return url or None
+
+
+def apollo_webhook_token() -> str:
+    """Stable secret for the Apollo async phone webhook. Uses APOLLO_WEBHOOK_SECRET if set,
+    else derives one from SECRET_KEY. Empty when neither is configured (then phone reveal is
+    skipped and only the synchronous email is returned)."""
+    t = _env("APOLLO_WEBHOOK_SECRET")
+    if t:
+        return t
+    sk = _env("SECRET_KEY")
+    if sk:
+        import hashlib
+        return hashlib.sha256(("apollo-phone:" + sk).encode()).hexdigest()[:32]
+    return ""
+
+
+def handle_apollo_phone_webhook(data: dict) -> int:
+    """Apollo posts the async phone-reveal result here (minutes after the match). Defensively
+    locate the people + their phone numbers and write them onto candidates by apollo_person_id.
+    Returns how many candidates were updated."""
+    if not isinstance(data, dict):
+        return 0
+    people = data.get("people") or data.get("contacts") or data.get("matches") or []
+    if not people and isinstance(data.get("person"), dict):
+        people = [data["person"]]
+    if isinstance(people, dict):
+        people = [people]
+    updated = 0
+    for p in people:
+        if not isinstance(p, dict):
+            continue
+        pid = p.get("id") or p.get("person_id") or p.get("apollo_id")
+        phone = _best_phone(p)
+        if pid and phone:
+            try:
+                if db.CandidateRepo.set_phone_by_apollo_id(str(pid), phone):
+                    updated += 1
+            except Exception as e:
+                log.warning("phone webhook update failed: %s", e)
+    if not updated:
+        log.info("apollo phone webhook: no usable phone in payload (keys=%s)", list(data.keys())[:8])
+    return updated
 
 
 def coresignal_status() -> dict:

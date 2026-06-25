@@ -398,11 +398,35 @@ def api_enrich(cid):
         return jsonify({"ok": False, "status": cur["enrichment_status"],
                         "error": "already_in_progress"}), 409
 
-    res = core.enrich_candidate(cid, reveal_email=reveal_email, reveal_phone=reveal_phone)
+    # Phone is async: Apollo needs a public webhook to deliver it. Derive the URL from this
+    # request (works on Railway) so the phone arrives a few minutes later via the webhook.
+    webhook_url = ""
+    if reveal_phone:
+        tok = core.apollo_webhook_token()
+        if tok:
+            webhook_url = request.host_url.rstrip("/") + "/api/apollo-phone-webhook?token=" + tok
+    res = core.enrich_candidate(cid, reveal_email=reveal_email, reveal_phone=reveal_phone,
+                                webhook_url=webhook_url)
     if not res.get("ok"):
         code = 409 if res.get("error") == "no_credits" else 400
         return jsonify(res), code
+    res["phone_pending"] = bool(reveal_phone and webhook_url)
     return jsonify(res)
+
+
+@app.post("/api/apollo-phone-webhook")
+def api_apollo_phone_webhook():
+    """Receives Apollo's async phone-reveal callback and writes the number onto the
+    candidate. Public (Apollo posts here) but guarded by a secret token in the query."""
+    tok = request.args.get("token") or request.headers.get("X-Webhook-Token") or ""
+    want = core.apollo_webhook_token()
+    if not want or tok != want:
+        return jsonify({"error": "forbidden"}), 403
+    if (r := _require_db()):
+        return r
+    data = request.get_json(silent=True) or {}
+    updated = core.handle_apollo_phone_webhook(data)
+    return jsonify({"ok": True, "updated": updated})
 
 
 @app.get("/api/credits")
