@@ -2894,6 +2894,53 @@ def reveal_phone_only(candidate_id: int, webhook_url: str = "") -> dict:
                         else "Phone reveal unavailable — check Apollo entitlement.")}
 
 
+def poll_one_phone(candidate_id: int) -> dict:
+    """Actively poll Apollo's webhook_result for ONE candidate's pending phone and write it if it's
+    ready. Called from the frontend's poll loop so delivery is driven by the user's own polling —
+    it does NOT depend on the background scheduler or on Apollo's inbound webhook reaching us.
+    FREE (no new credit). Returns {phone, pending, resolved, reason}."""
+    row = db.CandidateRepo.get(candidate_id) or {}
+    if row.get("phone"):
+        return {"phone": row["phone"], "pending": False, "resolved": True, "reason": "have_phone"}
+    rid = row.get("phone_request_id")
+    if not row.get("phone_pending"):
+        return {"phone": None, "pending": False, "resolved": True, "reason": "not_pending"}
+    if not rid:
+        # No async request_id captured (Apollo didn't return one) — only the inbound webhook can
+        # fill this. Keep showing pending; the webhook handler writes by apollo_person_id.
+        return {"phone": None, "pending": True, "resolved": False, "reason": "no_request_id"}
+    apollo = get_apollo()
+    if not getattr(apollo, "api_key", ""):
+        return {"phone": None, "pending": True, "resolved": False, "reason": "apollo_unconfigured"}
+    data = apollo.poll_webhook_result(rid)
+    if not isinstance(data, dict):
+        return {"phone": None, "pending": True, "resolved": False, "reason": "not_ready"}
+    people = data.get("people") or data.get("contacts") or []
+    if isinstance(people, dict):
+        people = [people]
+    got = None
+    for p in people:
+        if isinstance(p, dict):
+            got = _best_phone(p)
+            if got:
+                break
+    status = str(data.get("status") or "").lower()
+    if got:
+        try:
+            db.CandidateRepo.set_phone(candidate_id, got)
+        except Exception as e:
+            log.warning("poll_one_phone set failed (%s): %s", candidate_id, e)
+        return {"phone": got, "pending": False, "resolved": True, "reason": "filled"}
+    if status in ("success", "complete", "completed", "finished") or data.get("people") is not None:
+        # Apollo finished but has no mobile for this person — stop polling, report clearly.
+        try:
+            db.CandidateRepo.clear_phone_pending(candidate_id)
+        except Exception:
+            pass
+        return {"phone": None, "pending": False, "resolved": True, "reason": "no_phone_available"}
+    return {"phone": None, "pending": True, "resolved": False, "reason": "not_ready"}
+
+
 def reconcile_pending_phones(limit: int = 25) -> int:
     """Pull async phone reveals that Apollo has finished, by POLLING
     GET /api/v1/webhook_result/{request_id} for every candidate still awaiting a number.

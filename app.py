@@ -424,7 +424,19 @@ def api_person_phone(cid):
     cand = db.CandidateRepo.get(cid)
     if not cand:
         return jsonify({"error": "not_found"}), 404
-    return jsonify({"phone": cand.get("phone"), "has_phone": bool(cand.get("has_phone"))})
+    # If a reveal is still pending, ACTIVELY pull the result from Apollo now (drives delivery from
+    # this poll — no dependency on the scheduler or Apollo's inbound webhook reaching us).
+    if cand.get("phone_pending") and not cand.get("phone"):
+        try:
+            r = core.poll_one_phone(cid)
+            return jsonify({"phone": r.get("phone"),
+                            "has_phone": bool(cand.get("has_phone") or r.get("phone")),
+                            "pending": bool(r.get("pending")), "resolved": bool(r.get("resolved")),
+                            "reason": r.get("reason")})
+        except Exception:
+            pass
+    return jsonify({"phone": cand.get("phone"), "has_phone": bool(cand.get("has_phone")),
+                    "pending": bool(cand.get("phone_pending")), "resolved": bool(cand.get("phone"))})
 
 
 @app.post("/api/people/<int:cid>/ai-refresh")
@@ -468,6 +480,7 @@ def api_diag_phone():
                            and "127.0.0.1" not in webhook_url,
         "apollo_configured": bool(getattr(core.get_apollo(), "api_key", "")),
         "phones_in_db": db.CandidateRepo.phone_populated_count(),
+        "phone_pending": db.CandidateRepo.phone_pending_stats(),
         "recent_phone_attempts": db.EnrichmentLogRepo.recent_phone_attempts(10),
     })
 

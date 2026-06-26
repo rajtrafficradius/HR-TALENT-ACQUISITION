@@ -575,7 +575,9 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
     phPoll.current=setInterval(async()=>{n++;const r=await api('/api/people/'+id+'/phone');
       if(r&&r.phone){clearInterval(phPoll.current);setPhPending(false);
         setD(prev=>prev?{...prev,candidate:{...prev.candidate,phone:r.phone,phone_pending:0}}:prev);toast('Mobile arrived: '+r.phone,'ok');onChanged&&onChanged();}
-      else if(n>=36){clearInterval(phPoll.current);setPhPending(false);}},10000);};  // ~6 min; the server reconciler also fills it
+      else if(r&&r.resolved&&!r.phone){clearInterval(phPoll.current);setPhPending(false);  // Apollo finished, no number
+        setD(prev=>prev?{...prev,candidate:{...prev.candidate,phone_pending:0,has_phone:0}}:prev);toast('No mobile on file for this contact at Apollo','bad');}
+      else if(n>=36){clearInterval(phPoll.current);setPhPending(false);toast('Still processing at Apollo — it’ll appear automatically once delivered','ok');}},10000);};  // ~6 min; the server also keeps reconciling
   const revealPhone=async()=>{if(phBusy||phPending)return;setPhBusy(true);
     const r=await api('/api/reveal-phone/'+id,{method:'POST'});setPhBusy(false);
     if(r&&r.ok&&r.phone){toast('Mobile: '+r.phone,'ok');await load();onChanged&&onChanged();}

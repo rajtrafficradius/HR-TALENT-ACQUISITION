@@ -1331,6 +1331,18 @@ class CandidateRepo:
                 return [r["category"] for r in (cur.fetchall() or []) if r.get("category")]
 
     @staticmethod
+    def phone_pending_stats() -> dict:
+        """Diagnostics: how many candidates are awaiting an async phone, and how many of those
+        have an Apollo request_id (so we can tell if reveals are returning one to poll)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS pending, "
+                            "SUM(phone_request_id IS NOT NULL AND phone_request_id<>'') AS with_rid "
+                            "FROM candidates WHERE phone_pending=1")
+                r = cur.fetchone() or {}
+        return {"pending": int(r.get("pending") or 0), "with_request_id": int(r.get("with_rid") or 0)}
+
+    @staticmethod
     def phone_populated_count() -> int:
         with get_conn() as conn:
             with conn.cursor() as cur:
