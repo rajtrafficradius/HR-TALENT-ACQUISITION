@@ -262,6 +262,50 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .added-box .ab-ago{font-family:var(--mono);font-size:11px;color:var(--t3);white-space:nowrap}
 .evid{display:flex;gap:10px;flex-wrap:wrap}
 .evid .ev{flex:1;min-width:120px;background:#0d0d10;border:1px solid var(--line);border-radius:var(--rad);padding:12px 14px}
+/* ── Centered candidate modal + redesigned panel ─── */
+.modal-scrim{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.62);backdrop-filter:blur(6px);padding:22px;animation:fade .15s both}
+.panel-modal{width:min(760px,96vw);max-height:90vh;display:flex;flex-direction:column;background:var(--bg2);
+  border:1px solid var(--line2);border-radius:20px;overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.6);
+  animation:popin .22s cubic-bezier(.2,.9,.3,1.15)}
+@keyframes popin{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
+.panel-modal .dhead{flex:none}
+.panel-modal .dbody{flex:1;overflow-y:auto;padding:18px 24px 30px}
+.pm-avatar{width:48px;height:48px;border-radius:13px;object-fit:cover;background:var(--bg4);border:1px solid var(--line2);flex:none}
+.pm-avatar.ph{display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-size:19px;color:var(--t3)}
+.hero{display:flex;gap:16px;align-items:stretch}
+.hero-l{flex:none;display:flex;flex-direction:column;align-items:center;gap:7px;min-width:126px;
+  background:var(--bg);border:1px solid var(--line2);border-radius:var(--rad2);padding:15px 10px}
+.hero-verdict{font-family:var(--disp);font-weight:600;font-size:13.5px;text-align:center;line-height:1.25}
+.hero-r{flex:1;min-width:0}
+.ai-card{background:radial-gradient(420px 150px at 92% 0%,var(--amber-soft),transparent 70%),var(--bg);
+  border:1px solid var(--line2);border-radius:var(--rad2);padding:13px 16px;height:100%}
+.ai-card .ai-h{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.ai-badge{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;
+  border-radius:5px;border:1px solid var(--amber-dim);color:var(--amber);background:var(--amber-soft)}
+.ai-badge.derived{color:#7db8e0;border-color:rgba(74,158,216,.4);background:rgba(74,158,216,.1)}
+.ai-prose{font-size:13px;line-height:1.62;color:var(--t1)}
+.ai-refresh{margin-left:auto;cursor:pointer;color:var(--t4);font-size:13px;background:none;border:none;padding:0}
+.ai-refresh:hover{color:var(--amber)}
+@media(max-width:560px){.hero{flex-direction:column}}
+.sinfo-wrap{position:relative;display:inline-flex;vertical-align:middle}
+.sinfo-btn{width:15px;height:15px;border-radius:50%;border:1px solid var(--line3);background:transparent;
+  color:var(--t3);font-family:var(--mono);font-size:9.5px;font-weight:700;line-height:1;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;margin-left:5px;padding:0}
+.sinfo-btn:hover{border-color:var(--amber);color:var(--amber)}
+.sinfo-pop{position:fixed;z-index:80;width:280px;background:var(--bg4);border:1px solid var(--line3);
+  border-radius:10px;padding:12px 13px;box-shadow:0 16px 40px rgba(0,0,0,.55)}
+.sinfo-pop .sinfo-sum{font-size:12.5px;line-height:1.5;color:var(--t1);margin-bottom:8px}
+.sinfo-pop .sinfo-fac>div{font-family:var(--mono);font-size:10.5px;color:var(--t3);margin-top:2px}
+.sinfo-pop .sinfo-live{margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+.sinfo-pop .sinfo-l{font-size:11.5px;color:var(--t2);margin-top:2px}
+.dcard{margin-top:14px;border-top:1px solid var(--line);padding-top:6px}
+.dcard>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);padding:6px 0}
+.dcard>summary::-webkit-details-marker{display:none}
+.dcard>summary::before{content:'▸';color:var(--t4);transition:transform .15s;display:inline-block}
+.dcard[open]>summary::before{transform:rotate(90deg)}
+.ph-arriving{font-size:11px;color:#7db8e0;display:inline-flex;align-items:center;gap:6px}
 .evid .ev .en{font-family:var(--disp);font-weight:700;font-size:24px;color:var(--amber);line-height:1}
 .evid .ev .ek{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-top:5px}
 .blurb{background:var(--amber-soft);border:1px solid var(--amber-dim);border-radius:var(--rad);padding:12px 14px;color:#f0d9b5;font-size:13.5px;font-style:italic}
@@ -444,6 +488,38 @@ function Avail({email,phone}){
   return <span className="avail mono" title="Contact data available via Apollo enrichment">
     <span className={email?'on':''}>✉</span><span className={phone?'on':''}>☏</span></span>;
 }
+let _scoreExpl=null;
+async function loadScoreExpl(){ if(_scoreExpl)return _scoreExpl; const r=await api('/api/score-explanations'); _scoreExpl=(r&&!r.error)?r:{}; return _scoreExpl; }
+function ScoreInfo({info,live}){
+  const [open,setOpen]=useState(false),[pos,setPos]=useState(null); const btn=useRef(null);
+  const toggle=(e)=>{e.stopPropagation(); if(open){setOpen(false);return;}
+    const r=btn.current.getBoundingClientRect();
+    setPos({top:r.bottom+6, left:Math.max(10,Math.min(r.left-130,window.innerWidth-292))}); setOpen(true);};
+  useEffect(()=>{if(!open)return; const h=()=>setOpen(false); const t=setTimeout(()=>window.addEventListener('click',h),0);
+    return ()=>{clearTimeout(t);window.removeEventListener('click',h);};},[open]);
+  if(!info)return null;
+  return <span className="sinfo-wrap"><button ref={btn} className="sinfo-btn" onClick={toggle} title="How this score is derived">i</button>
+    {open&&pos&&<div className="sinfo-pop" style={{top:pos.top,left:pos.left}} onClick={e=>e.stopPropagation()}>
+      <div className="sinfo-sum">{info.summary}</div>
+      {(info.factors&&info.factors.length)?<div className="sinfo-fac">{info.factors.map((f,i)=><div key={i}>· {f}</div>)}</div>:null}
+      {(live&&live.length)?<div className="sinfo-live">{live.map((l,i)=><div key={i} className="sinfo-l">{l}</div>)}</div>:null}
+    </div>}</span>;
+}
+function ScoreGauges({c,expl}){
+  const sj=c.scores_json||{}, sig=sj.intent_signals||{};
+  const li=[]; if(sj.intent_regime)li.push('Regime: '+sj.intent_regime);
+  if(sig.tenure_months!=null)li.push('Months in role: '+sig.tenure_months);
+  if(sig.jobs_last_5y!=null)li.push('Jobs in 5y: '+sig.jobs_last_5y);
+  const rows=[['Role fit','role_fit_score','role_fit',null],['Job-change intent','job_change_intent_score','intent',li],
+    ['Technical','technical_score','technical',null],['Company quality','company_quality_score','company_quality',null],
+    ['Freshness','freshness_score','freshness',null]];
+  return <div className="sgrid" style={{gridTemplateColumns:'1fr 1fr'}}>{rows.map(([label,field,key,live])=>{
+    const v=c[field];
+    return <div key={key} className="gauge">
+      <div className="gt"><span className="gl">{label}<ScoreInfo info={expl[key]} live={live}/></span>
+        <span className="gv" style={{color:scoreColor(v)}}>{v??'—'}</span></div>
+      <div className="bar"><i style={{width:(v||0)+'%',background:scoreColor(v)}}/></div></div>;})}</div>;
+}
 
 /* ── Login ───────────────────────────────────────── */
 function Login({onIn}){
@@ -473,12 +549,27 @@ function ScoreBlock({c}){
 /* ── Person drawer ───────────────────────────────── */
 function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
   const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(true),[liBusy,setLiBusy]=useState(false),[phBusy,setPhBusy]=useState(false);
+  const [expl,setExpl]=useState({}),[phPending,setPhPending]=useState(false),[aiBusy,setAiBusy]=useState(false);
+  const phPoll=useRef(null);
   const load=useCallback(async()=>{const r=await api('/api/people/'+id); if(r.candidate)setD(r);},[id]);
-  const revealPhone=async()=>{if(phBusy)return;setPhBusy(true);
+  const startPhonePoll=()=>{let n=0;clearInterval(phPoll.current);setPhPending(true);
+    phPoll.current=setInterval(async()=>{n++;const r=await api('/api/people/'+id+'/phone');
+      if(r&&r.phone){clearInterval(phPoll.current);setPhPending(false);
+        setD(prev=>prev?{...prev,candidate:{...prev.candidate,phone:r.phone}}:prev);toast('Mobile arrived: '+r.phone,'ok');onChanged&&onChanged();}
+      else if(n>=18){clearInterval(phPoll.current);setPhPending(false);}},10000);};
+  const revealPhone=async()=>{if(phBusy||phPending)return;setPhBusy(true);
     const r=await api('/api/reveal-phone/'+id,{method:'POST'});setPhBusy(false);
-    if(r&&r.ok){toast(r.phone?('Mobile: '+r.phone):'Mobile requested — arrives in ~1-3 min, refresh','ok');await load();onChanged&&onChanged();}
-    else toast(r&&r.error==='no_credits'?'Apollo phone credits exhausted':'Phone reveal failed','bad');};
-  useEffect(()=>{setD(null);load();},[id,load]);
+    if(r&&r.ok&&r.phone){toast('Mobile: '+r.phone,'ok');await load();onChanged&&onChanged();}
+    else if(r&&r.ok){toast('Mobile requested — fetching for ~3 min…','ok');startPhonePoll();}
+    else{const e=r&&r.error;toast(
+      e==='no_credits'?'Apollo phone credits exhausted'
+      :e==='phone_reveal_rejected'?('Apollo rejected the phone reveal — '+(r.detail||'check entitlement/webhook'))
+      :'Phone reveal failed','bad');}};
+  const refreshAI=async()=>{if(aiBusy)return;setAiBusy(true);
+    const r=await api('/api/people/'+id+'/ai-refresh',{method:'POST'});setAiBusy(false);
+    if(r&&r.ok)setD(prev=>prev?{...prev,ai_paragraph:r.ai_paragraph,ai_paragraph_source:r.ai_paragraph_source}:prev);};
+  useEffect(()=>{setD(null);load();loadScoreExpl().then(setExpl);},[id,load]);
+  useEffect(()=>()=>clearInterval(phPoll.current),[]);
   const enrich=async()=>{setBusy(true);
     const r=await api('/api/enrich/'+id,{method:'POST',body:JSON.stringify({reveal_email:rE,reveal_phone:rP})});
     setBusy(false);
@@ -495,27 +586,39 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
       e==='insufficient_credits'?'CoreSignal credits exhausted':
       (e==='no_match'||e==='not_found')?'No LinkedIn profile matched this candidate':
       e==='auth'?'CoreSignal rejected the API key':'LinkedIn enrich failed','bad');}};
-  if(!d)return <div className="drawer"><div className="dhead"><div className="top"><div><h2>Loading…</h2></div>
+  if(!d)return <div className="panel-modal" onClick={e=>e.stopPropagation()}><div className="dhead"><div className="top"><div><h2>Loading…</h2></div>
     <button className="iconbtn" onClick={onClose}>✕</button></div></div>
     <div className="dbody"><div className="empty"><span className="spin"/></div></div></div>;
   const c=d.candidate, co=d.company, sig=(c.scores_json||{}).intent_signals||{}, ai=c.ai_meta_json||{};
   const eh=c.employment_history_json||[]; const enriched=c.enrichment_status==='enriched';
-  return <div className="drawer">
-    <div className="dhead"><div className="top"><div>
-      <h2>{c.full_name}</h2><div className="role">{c.title||'—'}{c.company_name?(' · '+c.company_name):''}</div></div>
+  const verdict=c.overall_candidate_score>=75?'Strong prospect':c.overall_candidate_score>=55?'Worth a look':'Low priority';
+  const initials=(c.full_name||'?').split(' ').filter(Boolean).map(x=>x[0]).join('').slice(0,2).toUpperCase();
+  const noEnrich=!(c.coresignal_enriched||c.linkedin_signals_json);
+  return <div className="panel-modal" onClick={e=>e.stopPropagation()}>
+    <div className="dhead"><div className="top" style={{gap:13,alignItems:'flex-start'}}>
+      {c.photo_url?<img className="pm-avatar" src={c.photo_url} alt="" referrerPolicy="no-referrer" onError={e=>{e.target.style.display='none';}}/>:<div className="pm-avatar ph">{initials}</div>}
+      <div style={{flex:1,minWidth:0}}>
+        <h2>{c.full_name}</h2><div className="role">{c.title||'—'}{c.company_name?(' · '+c.company_name):''}</div>
+        {c.headline&&<div style={{fontSize:11.5,color:'var(--t3)',marginTop:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.headline}</div>}</div>
       <button className="iconbtn" onClick={onClose}>✕</button></div>
       <div className="dmeta"><DeptTag d={c.department}/>{c.seniority&&<span className="tag">{titleCase(c.seniority)}</span>}
         {c.location_country&&<span className="tag">{c.location_country}</span>}
         {c.open_to_shift?<OpenBadge/>:null}</div></div>
     <div className="dbody">
-      <div className="sect"><div className="sect-h">Candidate score</div>
-        <div className="scorebig" style={{marginBottom:16}}><Ring value={c.overall_candidate_score}/>
-          <div><div className="kicker">Overall</div>
-            <div style={{fontFamily:'var(--disp)',fontWeight:600,fontSize:15,marginTop:2}}>
-              {c.overall_candidate_score>=75?'Strong prospect':c.overall_candidate_score>=55?'Worth a look':'Low priority'}</div></div></div>
-        <ScoreBlock c={c}/></div>
+      <div className="sect"><div className="hero">
+        <div className="hero-l"><div className="scorebig" style={{margin:0}}><Ring value={c.overall_candidate_score}/></div>
+          <div className="hero-verdict">{verdict}</div>
+          <div style={{display:'flex',alignItems:'center',gap:3}}><span className="kicker">Overall</span><ScoreInfo info={expl.overall}/></div></div>
+        <div className="hero-r"><div className="ai-card">
+          <div className="ai-h"><span className={cls('ai-badge',d.ai_paragraph_source!=='ai'&&'derived')}>{d.ai_paragraph_source==='ai'?'AI ✓':'Derived'}</span>
+            <span className="cell-sub" style={{margin:0}}>Recruiter brief</span>
+            <button className="ai-refresh" onClick={refreshAI} title="Regenerate brief">{aiBusy?'…':'↻'}</button></div>
+          <div className="ai-prose">{d.ai_paragraph||'Generating…'}</div></div></div>
+      </div></div>
 
-      <div className="sect"><div className="sect-h">Job-change intent &nbsp;<IntentSrc source={c.intent_source}/></div>
+      <div className="sect"><div className="sect-h">Score breakdown</div><ScoreGauges c={c} expl={expl}/></div>
+
+      {noEnrich&&<div className="sect"><div className="sect-h">Job-change intent &nbsp;<IntentSrc source={c.intent_source}/></div>
         {enriched&&sig.regime==='history'?
           <div className="evid" style={{marginBottom:12}}>
             <div className="ev"><div className="en">{sig.tenure_months??'—'}</div><div className="ek">Months in role</div></div>
@@ -523,8 +626,8 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
             <div className="ev"><div className="en">{sig.avg_tenure_months??'—'}</div><div className="ek">Avg tenure (mo)</div></div>
           </div>:
           <p style={{color:'var(--t3)',fontSize:13,marginBottom:6}}>
-            {enriched?'Evidence-based from employment history.':'Inferred from title, seniority & company signals. Enrich for evidence-based intent from real employment history.'}</p>}
-        {ai.why&&<div className="blurb">{ai.why}</div>}</div>
+            {enriched?'Evidence-based from employment history.':'Inferred from title, seniority & company signals. Enrich via LinkedIn for a verified read.'}</p>}
+        {ai.why&&<div className="blurb">{ai.why}</div>}</div>}
 
       {!!c.coresignal_enriched&&(()=>{const cj=c.coresignal_json||{};const a=cj.assessment||{};return(
         <div className="sect cs-box"><div className="sect-h cs-h">LinkedIn intelligence&nbsp;<span className="src cs">CoreSignal · AI ✓</span></div>
@@ -563,8 +666,8 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
           <div className="contact-row"><div className="ci">✉</div>
             <div className="cv" style={{flex:1}}>{c.email?c.email:<span className="cv dim">{c.has_email?'Available — not revealed':'Not available'}</span>}</div></div>
           <div className="contact-row"><div className="ci">☏</div>
-            <div className="cv" style={{flex:1}}>{c.phone?c.phone:<span className="cv dim">{c.has_phone?'Mobile available — fetch it →':'Not available'}</span>}</div>
-            {(!c.phone&&c.has_phone)?<button className="btn btn-sm" disabled={phBusy} onClick={revealPhone} title="Apollo delivers the mobile async (~1-3 min)">{phBusy?<span className="spin sm"/>:'Get mobile'}</button>:null}</div>
+            <div className="cv" style={{flex:1}}>{c.phone?c.phone:<span className="cv dim">{phPending?<span className="ph-arriving"><span className="spin sm"/>Mobile arriving… (~3 min)</span>:(c.has_phone?'Mobile available — fetch it →':'Not available')}</span>}</div>
+            {(!c.phone&&c.has_phone&&!phPending)?<button className="btn btn-sm" disabled={phBusy} onClick={revealPhone} title="Apollo delivers the mobile async (~1-3 min)">{phBusy?<span className="spin sm"/>:'Get mobile'}</button>:null}</div>
           <div className="contact-row"><div className="ci">in</div>
             {c.linkedin_url?<a className="cv" href={c.linkedin_url} target="_blank" rel="noopener" style={{flex:1}}>{c.linkedin_url.replace(/^https?:\/\/(www\.)?/,'')}</a>:
               <a className="cv" href={'https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent((c.full_name||'')+' '+(c.company_name||''))} target="_blank" rel="noopener" style={{flex:1}}>Search on LinkedIn ↗ <span style={{color:'var(--t4)'}}>(exact profile on Enrich)</span></a>}</div>
@@ -600,7 +703,7 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
         <div className="sgrid">
           <div className="kv"><span className="k">Industry</span><span className="v">{co.industry||(co.industry_derived?(co.industry_derived+' · inferred'):'—')}</span></div>
           <div className="kv"><span className="k">Company size</span><span className="v">{co.size_band||'—'}{(co.size_min!=null&&co.size_max!=null)?` (${fmtNum(co.size_min)}–${fmtNum(co.size_max)})`:''}</span></div>
-          <div className="kv"><span className="k">Quality</span><span className="v" style={{color:scoreColor(co.company_quality_score)}}>{co.company_quality_score}</span></div>
+          <div className="kv"><span className="k">Quality<ScoreInfo info={expl.company_quality}/></span><span className="v" style={{color:scoreColor(co.company_quality_score)}}>{co.company_quality_score}</span></div>
           <div className="kv"><span className="k">Region</span><span className="v">{[co.hq_city,co.country||co.hq_country].filter(Boolean).join(', ')||'—'}</span></div>
         </div></div>}
 
@@ -670,7 +773,7 @@ function CompanyDrawer({id,onClose,onPerson}){
 
 /* ── People view ─────────────────────────────────── */
 const FRESH=[['','Any time'],['7','Last 7 days'],['30','Last 30 days'],['90','Last 90 days']];
-const SORTS=[['overall','Overall score'],['intent','Job-change intent'],['recent','Recently added'],['company_quality','Company quality'],['technical','Technical'],['role_fit','Role fit'],['freshness','Freshness']];
+const SORTS=[['overall','Overall score'],['intent','Job-change intent'],['recent','Recently added'],['company_quality','Company quality'],['technical','Technical'],['role_fit','Role fit'],['freshness','Freshness'],['name','Name A–Z']];
 function PeopleView({filters,setFilters,onPerson,refreshKey}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
   const f=filters,reqId=useRef(0);
@@ -726,7 +829,7 @@ function CompaniesView({onCompany,meta}){
     <h3>Company filters</h3>
     <div className="fgroup"><label>Search</label><input className="inp sm" placeholder="Name or domain" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/></div>
     <div className="fgroup"><label>Category</label><select className="inp sm" value={f.category} onChange={e=>setF({...f,category:e.target.value})}>
-      <option value="">All categories</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+      <option value="">All categories</option>{cats.map(c=>{const n=(meta.category_company_counts||{})[c];return <option key={c} value={c}>{c}{n?` (${n})`:''}</option>;})}</select></div>
     <div className="fgroup"><label>Company size</label><select className="inp sm" value={f.size_band} onChange={e=>setF({...f,size_band:e.target.value})}>
       <option value="">Any size</option>{sizes.map(b=><option key={b} value={b}>{b}{SIZE_RANGE[b]?` (${SIZE_RANGE[b]})`:''}</option>)}</select></div>
     <div className="fgroup"><div className="rangerow"><label style={{margin:0}}>Min employees</label>
@@ -747,8 +850,9 @@ function CompaniesView({onCompany,meta}){
           {l}<span className="tc">{cc[v||'All']??''}</span></button>)}</div>
       <div className="spacer"/><div className="count"><b>{data.total}</b> {f.size_band||f.category||'companies'}</div></div>
     <div className="mscroll">{loading?<div className="empty"><span className="spin"/></div>:
-      data.rows.length===0?<div className="empty"><div className="big">No companies match</div>
-        <div>Widen the size range or region, or turn on Auto-hunt in Discovery.</div></div>:
+      data.rows.length===0?(()=>{const active=[f.category&&('category “'+f.category+'”'),f.size_band&&('size “'+f.size_band+'”'),f.country&&('region “'+f.country+'”'),(f.min_quality>0)&&('min quality '+f.min_quality),((f.min_employees||0)>0)&&('min employees '+f.min_employees)].filter(Boolean);
+        return <div className="empty"><div className="big">No companies match</div>
+          <div>{active.length>1?('That combination ('+active.join(' + ')+') is empty — try removing one filter.'):active.length===1?('Nothing matches '+active[0]+'. Widen it or clear it.'):'Widen the size range or region, or turn on Auto-hunt in Discovery.'}</div></div>;})():
       <div className="rows">{data.rows.map(co=><div key={co.id} className="row row-co" onClick={()=>onCompany(co.id)}>
         <div className="cell-co" style={{display:'flex',gap:11,alignItems:'center',minWidth:0}}>
           <Logo domain={co.root_domain} name={co.name} size={30}/>
@@ -1128,8 +1232,8 @@ function App(){
     {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast} meta={meta}/></div>}
     {tab==='linkedin'&&<div className="main"><LinkedInEnrichView toast={showToast} onChanged={()=>{refresh();loadStats();}} onPerson={setPerson}/></div>}
 
-    {person&&<><div className="scrim" onClick={()=>setPerson(null)}/>
-      <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast} onCompany={(coid)=>{setPerson(null);setCompany(coid);}}/></>}
+    {person&&<div className="modal-scrim" onClick={()=>setPerson(null)}>
+      <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast} onCompany={(coid)=>{setPerson(null);setCompany(coid);}}/></div>}
     {company&&<><div className="scrim" onClick={()=>setCompany(null)}/>
       <CompanyDrawer id={company} onClose={()=>setCompany(null)} onPerson={(pid)=>{setCompany(null);setPerson(pid);}}/></>}
     {toast&&<div className={cls('toast',toast.k)}>{toast.k==='ok'?'✓':'⚠'} {toast.m}</div>}
