@@ -22,6 +22,7 @@ from typing import Dict, Optional
 
 from flask import Flask, jsonify, request, send_from_directory, session
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 try:
     from dotenv import load_dotenv
@@ -42,6 +43,10 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ── Flask app + session config ───────────────────────────────────────────────
 app = Flask(__name__, static_folder=None)
+# Railway terminates TLS at its edge and forwards to the app over plain HTTP; trust the
+# X-Forwarded-* headers so request.scheme/host reflect the real public HTTPS origin (needed so
+# the Apollo phone webhook is built as a valid https:// URL — Apollo 400s on http).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 _secret = os.environ.get("SECRET_KEY")
 if not _secret:
     _secret = secrets.token_hex(32)
@@ -55,6 +60,32 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=60 * 60 * 12,
 )
 CORS(app, supports_credentials=True)
+
+
+def _public_base_url() -> str:
+    """Public base URL for outbound callbacks. Apollo REQUIRES https for the phone webhook and
+    rejects http with 400 ('Webhook URL is not a valid HTTPS URL'). Railway terminates TLS at its
+    edge, so the raw request can look like http://. Resolution order: PUBLIC_BASE_URL env override →
+    forwarded host/proto → force https for any non-local host."""
+    env = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    if env:
+        return env if "://" in env else ("https://" + env)
+    host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip()
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip() or request.scheme or "http"
+    if host and not (host.startswith("localhost") or host.startswith("127.0.0.1")):
+        proto = "https"  # public host sits behind Railway's TLS proxy
+    return f"{proto}://{host}"
+
+
+def _phone_webhook_url() -> str:
+    """The exact (https) webhook URL Apollo is told to call for async phone reveals — or '' if no
+    token is configured. Always HTTPS for public hosts so Apollo accepts the reveal and returns a
+    request_id (which the server-side poller then uses to pull the number)."""
+    tok = core.apollo_webhook_token()
+    if not tok:
+        return ""
+    return _public_base_url().rstrip("/") + "/api/apollo-phone-webhook?token=" + tok
+
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 if not APP_PASSWORD:
@@ -425,13 +456,16 @@ def api_diag_phone():
     """Diagnostics for the async phone flow: shows the exact webhook URL Apollo would be told to
     call (must be a PUBLIC https URL), whether the token is set, and the last phone attempts."""
     tok = core.apollo_webhook_token()
-    webhook_url = (request.host_url.rstrip("/") + "/api/apollo-phone-webhook?token=" + tok) if tok else ""
+    webhook_url = _phone_webhook_url()
+    base = _public_base_url()
     return jsonify({
         "webhook_url": webhook_url,
         "webhook_token_set": bool(tok),
-        "host_url": request.host_url,
-        "is_public_https": request.host_url.startswith("https://") and "localhost" not in request.host_url
-                           and "127.0.0.1" not in request.host_url,
+        "public_base_url": base,
+        "raw_host_url": request.host_url,
+        "x_forwarded_proto": request.headers.get("X-Forwarded-Proto"),
+        "is_public_https": webhook_url.startswith("https://") and "localhost" not in webhook_url
+                           and "127.0.0.1" not in webhook_url,
         "apollo_configured": bool(getattr(core.get_apollo(), "api_key", "")),
         "phones_in_db": db.CandidateRepo.phone_populated_count(),
         "recent_phone_attempts": db.EnrichmentLogRepo.recent_phone_attempts(10),
@@ -505,13 +539,9 @@ def api_enrich(cid):
         return jsonify({"ok": False, "status": cur["enrichment_status"],
                         "error": "already_in_progress"}), 409
 
-    # Phone is async: Apollo needs a public webhook to deliver it. Derive the URL from this
-    # request (works on Railway) so the phone arrives a few minutes later via the webhook.
-    webhook_url = ""
-    if reveal_phone:
-        tok = core.apollo_webhook_token()
-        if tok:
-            webhook_url = request.host_url.rstrip("/") + "/api/apollo-phone-webhook?token=" + tok
+    # Phone is async: Apollo needs a valid HTTPS webhook to ACCEPT the reveal (and return a
+    # request_id the poller uses). Build it as https regardless of Railway's internal http hop.
+    webhook_url = _phone_webhook_url() if reveal_phone else ""
     res = core.enrich_candidate(cid, reveal_email=reveal_email, reveal_phone=reveal_phone,
                                 webhook_url=webhook_url)
     if not res.get("ok"):
@@ -528,8 +558,7 @@ def api_reveal_phone(cid):
     Apollo delivers it async to the phone webhook a few minutes later."""
     if (r := _require_db()):
         return r
-    tok = core.apollo_webhook_token()
-    webhook_url = (request.host_url.rstrip("/") + "/api/apollo-phone-webhook?token=" + tok) if tok else ""
+    webhook_url = _phone_webhook_url()
     res = core.reveal_phone_only(cid, webhook_url=webhook_url)
     if not res.get("ok"):
         err = res.get("error")
