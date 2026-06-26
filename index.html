@@ -917,6 +917,7 @@ function DiscoveryView({onDone,toast,meta}){
   const groups=meta.groups||[];
   const [hunt,setHunt]=useState(null);
   const [roster,setRoster]=useState(null);
+  const [reproc,setReproc]=useState(null);
   const [sel,setSel]=useState([]);              // selected group names for a manual run
   const [locs,setLocs]=useState(['India','Australia']),[locIn,setLocIn]=useState('');
   const [maxc,setMaxc]=useState(600),[seed,setSeed]=useState(false);
@@ -929,8 +930,9 @@ function DiscoveryView({onDone,toast,meta}){
     if(r&&r.total_categories!=null&&Date.now()>=guard.current)setHunt(r);},[]);  // don't clobber a recent toggle
   const loadRoster=useCallback(async()=>{const r=await api('/api/roster');
     if(r&&r.companies_total!=null&&Date.now()>=rguard.current)setRoster(r);},[]);
-  useEffect(()=>{loadHunt();loadRoster();hpoll.current=setInterval(()=>{loadHunt();loadRoster();},10000);
-    return()=>{clearInterval(hpoll.current);if(poll.current)clearInterval(poll.current);};},[loadHunt,loadRoster]);
+  const loadReproc=useCallback(async()=>{const r=await api('/api/roster-reprocess');if(r&&r.companies_total!=null)setReproc(r);},[]);
+  useEffect(()=>{loadHunt();loadRoster();loadReproc();hpoll.current=setInterval(()=>{loadHunt();loadRoster();loadReproc();},10000);
+    return()=>{clearInterval(hpoll.current);if(poll.current)clearInterval(poll.current);};},[loadHunt,loadRoster,loadReproc]);
 
   const toggleHunt=async()=>{const next=!(hunt&&hunt.enabled);
     guard.current=Date.now()+3000;                          // ignore in-flight loadHunt for 3s
@@ -944,6 +946,11 @@ function DiscoveryView({onDone,toast,meta}){
     const r=await api('/api/roster',{method:'POST',body:JSON.stringify({enabled:next})});
     if(r&&r.ok)setRoster(r); else setRoster(h=>({...(h||{}),enabled:!next}));
     toast(next?'Roster verifier on — completing every company’s employee list':'Roster verifier paused', r&&r.ok?'ok':'bad');};
+  const toggleReproc=async()=>{const next=!(reproc&&reproc.enabled);
+    setReproc(h=>({...(h||{}),enabled:next}));
+    const r=await api('/api/roster-reprocess',{method:'POST',body:JSON.stringify({enabled:next})});
+    if(r&&r.ok)setReproc(r); else setReproc(h=>({...(h||{}),enabled:!next}));
+    toast(next?'Quality re-process on — upgrading every existing lead to the latest standard':'Re-process paused', r&&r.ok?'ok':'bad');};
   const toggleG=n=>setSel(p=>p.includes(n)?p.filter(x=>x!==n):[...p,n]);
   const addLoc=e=>{if(e.key==='Enter'&&locIn.trim()){setLocs(p=>[...new Set([...p,locIn.trim()])]);setLocIn('');e.preventDefault();}};
   const start=async()=>{
@@ -1000,6 +1007,21 @@ function DiscoveryView({onDone,toast,meta}){
         <div className={cls('bigsw',rOn&&'on')} onClick={toggleRoster}><div className="bigsw-k"/></div>
         <div className="bigsw-l">{rOn?'ON':'OFF'}</div></div>
     </div>
+
+    {(()=>{const rpOn=reproc&&reproc.enabled;return(
+    <div className={cls('panel','hunt-hero',rpOn&&'live')}>
+      <div className="hh-left">
+        <div className="kicker">Quality re-process</div>
+        <h3>Lead upgrade {rpOn?'is active':'is paused'} {rpOn&&<span className="live-dot"/>}</h3>
+        <p>Grinds the whole database, re-scoring and re-classifying every existing lead to the latest quality standards and assigning each company an authoritative category. Free, runs in the background.</p>
+        {reproc&&<div className="hh-meta">
+          <span><b>{(reproc.companies_done||0).toLocaleString()}</b>/{(reproc.companies_total||0).toLocaleString()} companies upgraded</span>
+          <span>{(reproc.companies_remaining||0).toLocaleString()} remaining</span></div>}
+      </div>
+      <div className="hh-right">
+        <div className={cls('bigsw',rpOn&&'on')} onClick={toggleReproc}><div className="bigsw-k"/></div>
+        <div className="bigsw-l">{rpOn?'ON':'OFF'}</div></div>
+    </div>);})()}
 
     <div className="panel">
       <div className="kicker" style={{marginBottom:10}}>Run once now — category groups</div>

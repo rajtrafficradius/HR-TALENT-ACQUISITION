@@ -2804,6 +2804,125 @@ def roster_status() -> dict:
             "started_at": s.get("roster_started_at"), **counts}
 
 
+def rescore_candidate(candidate_id: int, target_families: Optional[List[str]] = None) -> bool:
+    """Re-score & re-classify an EXISTING candidate from its stored fields using the CURRENT
+    scoring logic + taxonomy. FREE (no Apollo / no reveal). Preserves a LinkedIn/CoreSignal-
+    verified intent (higher quality than a recompute). Returns True if updated."""
+    row = db.CandidateRepo.get(candidate_id)
+    if not row:
+        return False
+    company = db.CompanyRepo.get(row["company_id"]) if row.get("company_id") else None
+    title = row.get("title") or ""
+    headline = row.get("headline") or ""
+    org = {"name": row.get("company_name"), "root_domain": row.get("company_domain"),
+           "industry": (company or {}).get("industry"),
+           "estimated_employees": (company or {}).get("estimated_employees"),
+           "annual_revenue": (company or {}).get("annual_revenue"),
+           "founded_year": (company or {}).get("founded_year"),
+           "website_url": (company or {}).get("website_url")}
+    base = {"title": title, "headline": headline, "seniority": row.get("seniority") or "",
+            "functions": [], "departments": row.get("departments_json") or [], "_org": org,
+            "employment_history": row.get("employment_history_json") or [],
+            "company_domain": row.get("company_domain"), "linkedin_url": row.get("linkedin_url")}
+    category = classify_category(title, headline) or row.get("category")
+    dept = CATEGORY_DEPT.get(category) if category else None
+    if not dept:
+        dept = classify_department(title, headline, row.get("departments_json") or [], [])
+    cq = score_company_quality(org) if org.get("estimated_employees") else (row.get("company_quality_score") or 50)
+    technical = score_technical(base)
+    role_fit = score_role_fit(base, target_families)
+    intent, intent_source, intent_signals = compute_intent(base)
+    if row.get("coresignal_enriched") or row.get("linkedin_enriched"):
+        intent = int(row.get("job_change_intent_score") or intent)
+        intent_source = row.get("intent_source") or intent_source
+        intent_signals = (row.get("scores_json") or {}).get("intent_signals") or intent_signals
+    freshness = score_freshness(row)
+    ai_meta = row.get("ai_meta_json") or heuristic_classify(base)
+    pack = {"role_fit": role_fit, "intent": intent, "technical": technical,
+            "company_quality": cq, "freshness": freshness}
+    pack = _apply_ai_nudge(pack, ai_meta)
+    overall = score_overall(pack)
+    scores_json = {**pack, "overall": overall, "intent_regime": intent_source,
+                   "intent_signals": intent_signals, "weights": WEIGHTS}
+    db.CandidateRepo.apply_rescore(
+        candidate_id, category=category, department=dept, technical=pack["technical"],
+        role_fit=role_fit, intent=intent, company_quality=cq, freshness=freshness,
+        overall=overall, intent_source=intent_source, scores_json=scores_json)
+    return True
+
+
+def recompute_company_category(company_id: int) -> Optional[str]:
+    """Set the authoritative per-company category: score-weighted dominant candidate category,
+    confirmed/overridden by the company's homepage text when it clearly indicates one. FREE."""
+    cat = db.CandidateRepo.weighted_dominant_category(company_id)
+    source = "candidates"
+    co = db.CompanyRepo.get(company_id)
+    if co:
+        web_text = " ".join(filter(None, [co.get("description"), co.get("industry"), co.get("name")]))
+        web_cat = classify_category("", web_text) if web_text else None
+        if web_cat:
+            cat, source = web_cat, "web"
+    if cat:
+        db.CompanyRepo.set_category(company_id, cat, source)
+    return cat
+
+
+def roster_reprocess_batch(limit: int = 2, logf=None) -> dict:
+    """Bring EXISTING records up to current quality standards (FREE — no reveal credits): for
+    each due company refresh free firmographics (domain + homepage 'About'), re-score &
+    re-classify every attached candidate, then set the authoritative company category."""
+    companies = db.CompanyRepo.reprocess_pending(limit)
+    n_co = n_cand = 0
+    for co in companies:
+        try:
+            if not co.get("root_domain"):
+                d = resolve_company_domain(co.get("name") or "")
+                if d:
+                    db.CompanyRepo.set_domain(co["id"], d, f"https://{d}")
+                    co["root_domain"] = d
+            if co.get("root_domain") and not co.get("description"):
+                info = fetch_company_web(co["root_domain"])
+                db.CompanyRepo.set_web(co["id"], info.get("description"), info.get("og_image"))
+        except Exception as e:
+            log.warning("reprocess firmographics %s: %s", co.get("id"), e)
+        for cand in db.CandidateRepo.for_company(co["id"], limit=10000):
+            try:
+                if rescore_candidate(cand["id"]):
+                    n_cand += 1
+            except Exception as e:
+                log.warning("rescore %s: %s", cand.get("id"), e)
+        try:
+            recompute_company_category(co["id"])
+        except Exception as e:
+            log.warning("recompute_company_category %s: %s", co.get("id"), e)
+        db.CompanyRepo.mark_reprocessed(co["id"])
+        n_co += 1
+    if logf and companies:
+        logf(f"Re-process: upgraded {n_cand} candidates across {n_co} companies")
+    return {"companies": n_co, "candidates": n_cand}
+
+
+def roster_reprocess_enabled() -> bool:
+    return db.SettingsRepo.get_bool("roster_reprocess", _env("ROSTER_REPROCESS_ENABLED", "0") == "1")
+
+
+def set_roster_reprocess(on: bool) -> None:
+    db.SettingsRepo.set("roster_reprocess", "1" if on else "0")
+    if on:
+        db.SettingsRepo.set("roster_reprocess_started_at", now_utc().isoformat())
+
+
+def roster_reprocess_status() -> dict:
+    s = db.SettingsRepo.get_many(["roster_reprocess", "roster_reprocess_started_at", "roster_reprocess_last_at"])
+    counts = db.CompanyRepo.reprocess_counts()
+    rv = s.get("roster_reprocess")
+    enabled = (rv in ("1", "true", "True", "on")) if rv is not None else (_env("ROSTER_REPROCESS_ENABLED", "0") == "1")
+    return {"enabled": enabled, "last_at": s.get("roster_reprocess_last_at"),
+            "started_at": s.get("roster_reprocess_started_at"),
+            "companies_total": counts["total"], "companies_done": counts["done"],
+            "companies_remaining": max(0, counts["total"] - counts["done"])}
+
+
 def hunt_status() -> dict:
     """Single-query status snapshot (fast even over a high-latency DB proxy)."""
     s = db.SettingsRepo.get_many(["auto_hunt", "hunt_last_at", "hunt_started_at",
@@ -2894,6 +3013,18 @@ def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
                         log.info("roster verify: +%d people across %d companies", added, n)
                 except Exception as e:
                     log.warning("roster sync error: %s", e)
+
+            # Re-process & upgrade existing leads to current quality standards (separate toggle,
+            # FREE). Paced slow so it grinds the whole DB without hammering anything.
+            if roster_reprocess_enabled():
+                try:
+                    r = roster_reprocess_batch(_env_int("ROSTER_REPROCESS_PER_TICK", 2))
+                    db.SettingsRepo.set("roster_reprocess_last_at", now_utc().isoformat())
+                    if r.get("candidates"):
+                        log.info("roster reprocess: upgraded %d candidates / %d companies",
+                                 r["candidates"], r["companies"])
+                except Exception as e:
+                    log.warning("roster reprocess error: %s", e)
 
             if not auto_hunt_enabled():
                 continue

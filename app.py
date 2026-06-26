@@ -661,6 +661,28 @@ def api_roster_toggle():
     return jsonify({"ok": True, **core.roster_status()})
 
 
+@app.get("/api/roster-reprocess")
+@require_auth
+def api_roster_reprocess_status():
+    return jsonify(core.roster_reprocess_status())
+
+
+@app.post("/api/roster-reprocess")
+@require_auth
+def api_roster_reprocess_toggle():
+    """Toggle the quality re-process: when ON, the scheduler grinds the whole DB, re-scoring
+    and re-classifying every existing lead to the latest standards (FREE). Pass {run_once:N}
+    to run a small batch synchronously right now for an immediate sample."""
+    if (r := _require_db()):
+        return r
+    data = request.get_json(silent=True) or {}
+    if data.get("run_once"):
+        ran = core.roster_reprocess_batch(int(data.get("run_once") or 1))
+        return jsonify({"ok": True, "ran": ran, **core.roster_reprocess_status()})
+    core.set_roster_reprocess(bool(data.get("enabled")))
+    return jsonify({"ok": True, **core.roster_reprocess_status()})
+
+
 @app.get("/api/runs")
 @require_auth
 def api_runs():

@@ -449,6 +449,7 @@ _MIGRATIONS = (
     ("candidates", "ai_paragraph_source", "ALTER TABLE candidates ADD COLUMN ai_paragraph_source VARCHAR(16) NULL"),
     ("companies", "category", "ALTER TABLE companies ADD COLUMN category VARCHAR(64) NULL"),
     ("companies", "category_source", "ALTER TABLE companies ADD COLUMN category_source VARCHAR(16) NULL"),
+    ("companies", "reprocessed_at", "ALTER TABLE companies ADD COLUMN reprocessed_at DATETIME NULL"),
 )
 _MIGRATION_INDEXES = (
     ("companies", "idx_company_webchk", "ALTER TABLE companies ADD KEY idx_company_webchk (web_checked)"),
@@ -816,6 +817,43 @@ class CompanyRepo:
                 return {r["category"]: int(r["c"]) for r in (cur.fetchall() or [])}
 
     @staticmethod
+    def set_category(company_id: int, category: str, source: str) -> None:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET category=%s, category_source=%s WHERE id=%s",
+                            ((category or None), (source or "")[:16], company_id))
+            conn.commit()
+
+    @staticmethod
+    def reprocess_pending(limit: int = 2) -> List[dict]:
+        """Companies due for a quality re-process (never done, or done >30 days ago), most
+        populated first so the highest-value companies are upgraded first."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name, root_domain, description, industry FROM companies "
+                    "WHERE reprocessed_at IS NULL OR reprocessed_at < (NOW() - INTERVAL 30 DAY) "
+                    "ORDER BY reprocessed_at IS NOT NULL, "
+                    "(SELECT COUNT(*) FROM candidates c WHERE c.company_id=companies.id) DESC LIMIT %s",
+                    (limit,))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def mark_reprocessed(company_id: int) -> None:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET reprocessed_at=NOW() WHERE id=%s", (company_id,))
+            conn.commit()
+
+    @staticmethod
+    def reprocess_counts() -> dict:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS total, SUM(reprocessed_at IS NOT NULL) AS done FROM companies")
+                r = cur.fetchone() or {}
+        return {"total": int(r.get("total") or 0), "done": int(r.get("done") or 0)}
+
+    @staticmethod
     def get(company_id: int) -> Optional[dict]:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -1155,6 +1193,36 @@ class CandidateRepo:
                 n = cur.rowcount
             conn.commit()
         return n > 0
+
+    @staticmethod
+    def apply_rescore(candidate_id: int, *, category, department, technical, role_fit, intent,
+                      company_quality, freshness, overall, intent_source, scores_json) -> None:
+        """Write recomputed scores + (re)classified category onto an existing candidate.
+        Does NOT touch last_verified_at (no fresh fetch happened) or the LinkedIn signals."""
+        thr = int(os.environ.get("HR_INTENT_OPEN_THRESHOLD", "60"))
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE candidates SET category=%s, department=%s, technical_score=%s, "
+                    "role_fit_score=%s, job_change_intent_score=%s, company_quality_score=%s, "
+                    "freshness_score=%s, overall_candidate_score=%s, intent_source=%s, "
+                    "scores_json=%s, open_to_shift=IF(%s>=%s,1,0) WHERE id=%s",
+                    (category, department, int(technical), int(role_fit), int(intent),
+                     int(company_quality), int(freshness), int(overall), intent_source,
+                     _dumps(scores_json), int(intent), thr, candidate_id))
+            conn.commit()
+
+    @staticmethod
+    def weighted_dominant_category(company_id: int) -> Optional[str]:
+        """Authoritative company category: the candidate category with the highest summed
+        overall score (so senior/high-quality people weigh more)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT category, SUM(overall_candidate_score) AS w FROM candidates "
+                            "WHERE company_id=%s AND category IS NOT NULL AND category<>'' "
+                            "GROUP BY category ORDER BY w DESC LIMIT 1", (company_id,))
+                r = cur.fetchone()
+        return r["category"] if r else None
 
     @staticmethod
     def phone_populated_count() -> int:
