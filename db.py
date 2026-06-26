@@ -445,10 +445,15 @@ _MIGRATIONS = (
     ("candidates", "coresignal_id", "ALTER TABLE candidates ADD COLUMN coresignal_id VARCHAR(64) NULL"),
     ("candidates", "coresignal_json", "ALTER TABLE candidates ADD COLUMN coresignal_json JSON NULL"),
     ("candidates", "coresignal_checked_at", "ALTER TABLE candidates ADD COLUMN coresignal_checked_at DATETIME NULL"),
+    ("candidates", "ai_paragraph", "ALTER TABLE candidates ADD COLUMN ai_paragraph TEXT NULL"),
+    ("candidates", "ai_paragraph_source", "ALTER TABLE candidates ADD COLUMN ai_paragraph_source VARCHAR(16) NULL"),
+    ("companies", "category", "ALTER TABLE companies ADD COLUMN category VARCHAR(64) NULL"),
+    ("companies", "category_source", "ALTER TABLE companies ADD COLUMN category_source VARCHAR(16) NULL"),
 )
 _MIGRATION_INDEXES = (
     ("companies", "idx_company_webchk", "ALTER TABLE companies ADD KEY idx_company_webchk (web_checked)"),
     ("candidates", "idx_cand_cs", "ALTER TABLE candidates ADD KEY idx_cand_cs (coresignal_enriched)"),
+    ("companies", "idx_company_category", "ALTER TABLE companies ADD KEY idx_company_category (category)"),
     ("companies", "idx_company_roster", "ALTER TABLE companies ADD KEY idx_company_roster (roster_synced_at)"),
     ("candidates", "idx_cand_li", "ALTER TABLE candidates ADD KEY idx_cand_li (linkedin_enriched)"),
     ("companies", "idx_company_country", "ALTER TABLE companies ADD KEY idx_company_country (country)"),
@@ -800,6 +805,17 @@ class CompanyRepo:
                 return {r["b"]: int(r["c"]) for r in (cur.fetchall() or [])}
 
     @staticmethod
+    def category_company_counts() -> dict:
+        """Companies per authoritative category (fast, indexed). Empty until the roster
+        re-process backfills companies.category; the frontend shows counts only when present,
+        and the category filter still works via the candidate fallback in list_page."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT category, COUNT(*) AS c FROM companies "
+                            "WHERE category IS NOT NULL AND category<>'' GROUP BY category")
+                return {r["category"]: int(r["c"]) for r in (cur.fetchall() or [])}
+
+    @staticmethod
     def get(company_id: int) -> Optional[dict]:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -829,11 +845,13 @@ class CompanyRepo:
             where.append("(country=%s OR EXISTS (SELECT 1 FROM candidates c "
                          "WHERE c.company_id=companies.id AND c.location_country=%s))")
             params += [filters["country"], filters["country"]]
-        # Category (the 28-item taxonomy): company has a candidate of that category.
+        # Category: use the authoritative per-company category when it's been set, else fall
+        # back to "has a candidate of that category" so the filter works before backfill.
         if filters.get("category"):
-            where.append("EXISTS (SELECT 1 FROM candidates c "
-                         "WHERE c.company_id=companies.id AND c.category=%s)")
-            params.append(filters["category"])
+            where.append("(companies.category=%s OR ((companies.category IS NULL OR companies.category='') "
+                         "AND EXISTS (SELECT 1 FROM candidates c "
+                         "WHERE c.company_id=companies.id AND c.category=%s)))")
+            params += [filters["category"], filters["category"]]
         # Employee-count slider + size-category filters.
         if filters.get("min_employees"):
             where.append("estimated_employees>=%s"); params.append(int(filters["min_employees"]))
@@ -1139,6 +1157,22 @@ class CandidateRepo:
         return n > 0
 
     @staticmethod
+    def phone_populated_count() -> int:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS c FROM candidates WHERE phone IS NOT NULL AND phone<>''")
+                return int(cur.fetchone()["c"])
+
+    @staticmethod
+    def set_ai_paragraph(candidate_id: int, paragraph: str, source: str) -> None:
+        """Cache the AI recruiter brief on the row so it isn't regenerated every panel open."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE candidates SET ai_paragraph=%s, ai_paragraph_source=%s WHERE id=%s",
+                            ((paragraph or "")[:2000], (source or "")[:16], candidate_id))
+            conn.commit()
+
+    @staticmethod
     def set_linkedin_url(candidate_id: int, url: str) -> None:
         """Light update of just the LinkedIn URL (used when Apollo resolves it for a
         candidate that lacked one, so CoreSignal can do a precise profile lookup)."""
@@ -1286,6 +1320,15 @@ class EnrichmentLogRepo:
                     "SELECT id, reveal_email, reveal_phone, http_status, result, credits_spent, "
                     "email_revealed, phone_revealed, error_text, created_at FROM enrichment_log "
                     "WHERE candidate_id=%s ORDER BY created_at DESC LIMIT %s", (candidate_id, limit))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def recent_phone_attempts(limit: int = 10) -> List[dict]:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT candidate_id, http_status, result, phone_revealed, error_text, created_at "
+                    "FROM enrichment_log WHERE reveal_phone=1 ORDER BY created_at DESC LIMIT %s", (limit,))
                 return list(cur.fetchall() or [])
 
 

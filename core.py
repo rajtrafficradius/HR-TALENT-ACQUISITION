@@ -196,6 +196,7 @@ class ApolloClient:
 
         resp = self._post(url, payload)
         retried = False
+        phone_reveal_error = None  # captured so the real Apollo phone-reject reason isn't swallowed
         # On a non-credits 400/422, first drop the phone reveal (the usual cause — its
         # webhook), KEEPING the email reveal; if it still fails, drop email too for the
         # base record. Never lose the synchronous email just because phone failed.
@@ -210,15 +211,19 @@ class ApolloClient:
                 return {"_ok": False, "_no_credits": True, "_http_status": resp.status_code}
             if payload.pop("reveal_phone_number", None) is not None:
                 payload.pop("webhook_url", None)
+                phone_reveal_error = f"http_{resp.status_code}: {body}"
+                log.warning("Apollo phone reveal rejected: %s", phone_reveal_error)
             elif payload.pop("reveal_personal_emails", None) is None:
                 break  # nothing left to strip
             resp = self._post(url, payload)
             retried = True
 
         if resp is None:
-            return {"_ok": False, "_http_status": None, "_error": "network"}
+            return {"_ok": False, "_http_status": None, "_error": "network",
+                    "_phone_reveal_error": phone_reveal_error}
         if resp.status_code != 200:
-            return {"_ok": False, "_http_status": resp.status_code, "_error": resp.text[:200]}
+            return {"_ok": False, "_http_status": resp.status_code, "_error": resp.text[:200],
+                    "_phone_reveal_error": phone_reveal_error}
 
         self.counter["match"] += 1
         person = (resp.json() or {}).get("person") or {}
@@ -229,6 +234,8 @@ class ApolloClient:
             co_phone = safe_str(pp.get("number") or pp.get("sanitized_number"))
         return {
             "_ok": True, "_http_status": 200, "_retried": retried,
+            "_phone_reveal_error": phone_reveal_error,
+            "_phone_requested": ("reveal_phone_number" in payload) or bool(webhook_url and not phone_reveal_error),
             "email": _best_email(person, first_name, last_name),
             "phone": _best_phone(person, co_phone),
             "employment_history": person.get("employment_history") or [],
@@ -1032,6 +1039,43 @@ def linkedin_search_url(full_name: str, company: str = "") -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# Plain-language derivations for the "i" explainer next to every score. Each entry:
+# {summary, factors[]} — kept truthful to the actual scoring functions below.
+SCORE_EXPLANATIONS = {
+    "overall": {
+        "summary": "A weighted blend of the five sub-scores — role fit leads, job-change "
+                   "readiness is next, then technical depth, company quality and data freshness.",
+        "factors": ["Role fit 30%", "Job-change intent 25%", "Technical 15%",
+                    "Company quality 15%", "Freshness 15%"]},
+    "role_fit": {
+        "summary": "How closely the person's role matches the target functions (sales, "
+                   "marketing, SEO, digital marketing). Exact-title and recognised-category "
+                   "roles score highest; unrelated 'other' roles are discounted.",
+        "factors": ["Exact target title = 100", "Strong keyword/category match = 70–85",
+                    "Recognised taxonomy category ≥ 65", "Unrelated 'other' role ×0.7"]},
+    "intent": {
+        "summary": "Likelihood the person is open to a move. With real employment history it "
+                   "is evidence-based (tenure + job frequency); otherwise it is inferred from "
+                   "title, seniority and industry signals.",
+        "factors": ["History regime: months in role, jobs in last 5y, average tenure",
+                    "Heuristic regime: seniority, contractor/agency signals, open-to-work cues"]},
+    "technical": {
+        "summary": "Hands-on/technical depth from job-title keywords and engineering/marketing "
+                   "functions, anchored by seniority.",
+        "factors": ["Seniority baseline", "Specialist tool/skill keywords (+6 each, capped)",
+                    "Generic keywords (+3 each)", "Engineering/marketing function bonus"]},
+    "company_quality": {
+        "summary": "Quality of the person's current employer — a blend of company size, "
+                   "revenue and longevity, with a bonus for marketing-adjacent and tech industries.",
+        "factors": ["Size 40%", "Revenue 35%", "Company age 25%",
+                    "Industry/website bonuses"]},
+    "freshness": {
+        "summary": "How recent the underlying data is. Verified within 7 days scores full; "
+                   "older data decays toward a floor.",
+        "factors": ["≤7 days = 100", "≥90 days = 10", "Linear decay in between"]},
+}
+
+
 def score_technical(c: dict) -> int:
     base = SENIORITY_POINTS.get((c.get("seniority") or "").lower(), 40)
     text = _text(c)
@@ -1387,6 +1431,94 @@ def openai_classify(batch: List[dict]) -> List[dict]:
     except Exception as e:
         log.warning("openai_classify failed (%s) — using heuristics", e)
         return [heuristic_classify(c) for c in batch]
+
+
+def _candidate_facts(cand: dict, company: Optional[dict]) -> dict:
+    """Compact, strictly job-relevant facts for the AI brief — NEVER protected attributes."""
+    ai = cand.get("ai_meta_json") or {}
+    sj = cand.get("scores_json") or {}
+    csj = cand.get("coresignal_json") or {}
+    cs = csj.get("assessment") or {}
+    csraw = csj.get("raw") or {}
+    sig = sj.get("intent_signals") or {}
+    return {
+        "name": cand.get("full_name"), "title": cand.get("title"),
+        "headline": cand.get("headline"), "current_company": cand.get("company_name"),
+        "role_family": ai.get("role_family"),
+        "seniority": cand.get("seniority") or ai.get("seniority_level"),
+        "technical_level": ai.get("technical_level"),
+        "department": cand.get("department") or ai.get("department"),
+        "category": cand.get("category"), "intent_regime": sj.get("intent_regime"),
+        "intent_score": cand.get("job_change_intent_score"),
+        "open_to_shift": bool(cand.get("open_to_shift")),
+        "months_in_role": sig.get("tenure_months"), "jobs_last_5y": sig.get("jobs_last_5y"),
+        "avg_tenure_months": sig.get("avg_tenure_months"),
+        "company_industry": (company or {}).get("industry") or (company or {}).get("industry_derived"),
+        "company_size": (company or {}).get("size_band"),
+        "company_quality": cand.get("company_quality_score"),
+        "overall_score": cand.get("overall_candidate_score"),
+        "linkedin_summary": cs.get("professional_summary") or csraw.get("summary"),
+        "expertise": (cs.get("expertise") or csraw.get("skills") or [])[:10],
+        "ai_why": ai.get("why"),
+    }
+
+
+def _deterministic_paragraph(f: dict) -> str:
+    """Always-available candidate narrative composed from facts (no OpenAI needed)."""
+    name = f.get("name") or "This candidate"
+    sen = (f.get("seniority") or "").replace("_", " ")
+    sen = "" if sen in ("", "unknown") else sen + " "
+    role = f.get("title") or f.get("role_family") or "professional"
+    lead = f"{name} is a {sen}{role}"
+    if f.get("current_company"):
+        lead += f" at {f['current_company']}"
+    if f.get("company_industry"):
+        lead += f" ({f['company_industry']})"
+    bits = [lead.strip() + "."]
+    if f.get("linkedin_summary"):
+        bits.append(str(f["linkedin_summary"]).strip().rstrip(".") + ".")
+    if f.get("intent_regime") == "history" and f.get("months_in_role") is not None:
+        s = f"Evidence-based job-change read: ~{f['months_in_role']} months in the current role"
+        if f.get("jobs_last_5y"):
+            s += f", {f['jobs_last_5y']} roles in the last 5 years"
+        bits.append(s + f" (intent {f.get('intent_score')}/100).")
+    else:
+        bits.append(f"Job-change intent {f.get('intent_score')}/100"
+                    + (" — flagged open to shift." if f.get("open_to_shift")
+                       else " (inferred from role and seniority)."))
+    if f.get("ai_why"):
+        bits.append(str(f["ai_why"]).strip().rstrip(".") + ".")
+    return " ".join(b for b in bits if b)[:800]
+
+
+def generate_candidate_paragraph(cand: dict, company: Optional[dict] = None) -> dict:
+    """Concise 2-4 sentence recruiter brief for a candidate. Uses gpt-4o-mini when available —
+    strictly grounded in the provided facts and FORBIDDEN from inferring or using any protected
+    characteristic — and always falls back to a deterministic paragraph. Returns {paragraph, source}."""
+    f = _candidate_facts(cand, company)
+    if not openai_available():
+        return {"paragraph": _deterministic_paragraph(f), "source": "derived"}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        sysmsg = ("You are an expert technical recruiter writing a concise candidate brief for "
+                  "another recruiter. Use ONLY the provided facts — NEVER invent experience, skills, "
+                  "employers or numbers. Write 2-4 plain sentences: who they are (role & seniority), "
+                  "what they likely do well, the job-change read (cite the strongest signal), and one "
+                  "reason to reach out now. Reason ONLY on job-relevant evidence. NEVER infer or "
+                  "mention age, gender, race, ethnicity, nationality, religion, disability, "
+                  "marital/family status, or any protected characteristic or proxy. Return STRICT "
+                  'JSON: {"paragraph":"<the brief>"}.')
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0.3, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": sysmsg},
+                      {"role": "user", "content": json.dumps(f, default=str)}], timeout=30)
+        para = (json.loads(resp.choices[0].message.content).get("paragraph") or "").strip()
+        if para:
+            return {"paragraph": para[:900], "source": "ai"}
+    except Exception as e:
+        log.warning("ai paragraph failed (%s) — using deterministic", e)
+    return {"paragraph": _deterministic_paragraph(f), "source": "derived"}
 
 
 def _apply_ai_nudge(scores: dict, ai_meta: dict) -> dict:
@@ -2609,7 +2741,7 @@ def reveal_phone_only(candidate_id: int, webhook_url: str = "") -> dict:
     if res.get("_no_credits"):
         return {"ok": False, "error": "no_credits"}
     if not res.get("_ok"):
-        return {"ok": False, "error": "apollo_failed"}
+        return {"ok": False, "error": "apollo_failed", "detail": res.get("_phone_reveal_error")}
     phone = res.get("phone")  # occasionally present synchronously
     if phone and row.get("apollo_person_id"):
         try:
@@ -2618,6 +2750,10 @@ def reveal_phone_only(candidate_id: int, webhook_url: str = "") -> dict:
             log.warning("reveal_phone_only set failed: %s", e)
         return {"ok": True, "phone": phone, "phone_pending": False,
                 "candidate": db.CandidateRepo.get(candidate_id)}
+    # Apollo rejected the phone reveal (e.g. webhook unreachable / not entitled) — report it.
+    if res.get("_phone_reveal_error"):
+        return {"ok": False, "error": "phone_reveal_rejected",
+                "detail": res.get("_phone_reveal_error")}
     return {"ok": True, "phone": None, "phone_pending": bool(webhook_url),
             "message": ("Mobile requested — Apollo delivers it via webhook in ~1–3 min; refresh."
                         if webhook_url else "Phone webhook unavailable (set APP_PASSWORD or SECRET_KEY).")}

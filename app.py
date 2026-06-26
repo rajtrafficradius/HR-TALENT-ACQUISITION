@@ -282,8 +282,9 @@ def api_filters():
     return jsonify({
         "departments": db.CandidateRepo.distinct_departments(),
         "seniorities": db.CandidateRepo.distinct_seniorities(),
-        "categories": core.CATEGORY_LABELS,                       # full fixed 28-item list
+        "categories": core.CATEGORY_LABELS,                       # full fixed taxonomy
         "active_categories": db.CandidateRepo.distinct_categories(),  # categories with data
+        "category_company_counts": db.CompanyRepo.category_company_counts(),  # '(N)' per category
         "groups": [{"name": g, "categories": core.GROUPS[g]} for g in core.GROUP_ORDER],
         "industries": db.CompanyRepo.distinct_industries(),
         "companies": db.CandidateRepo.companies_for_filter(),
@@ -348,8 +349,77 @@ def api_person(cid):
                 "start_date": e.get("start_date"), "end_date": e.get("end_date"),
                 "current": bool(e.get("current")), "company_id": idmap.get(key)})
 
+    # AI recruiter brief (paragraph) — generated once, then cached on the row.
+    ai_paragraph = cand.get("ai_paragraph")
+    ai_paragraph_source = cand.get("ai_paragraph_source")
+    if not ai_paragraph:
+        try:
+            res = core.generate_candidate_paragraph(cand, company)
+            ai_paragraph = res.get("paragraph")
+            ai_paragraph_source = res.get("source")
+            if ai_paragraph:
+                db.CandidateRepo.set_ai_paragraph(cid, ai_paragraph, ai_paragraph_source or "")
+        except Exception:
+            ai_paragraph = None
+
     return jsonify({"candidate": cand, "company": company, "past_companies": past_companies,
+                    "ai_paragraph": ai_paragraph, "ai_paragraph_source": ai_paragraph_source,
                     "enrichment_log": db.EnrichmentLogRepo.for_candidate(cid)})
+
+
+@app.get("/api/people/<int:cid>/phone")
+@require_auth
+def api_person_phone(cid):
+    """Light poll endpoint — the candidate panel calls this after 'Get mobile' to surface the
+    async-delivered mobile without reloading the whole record."""
+    if (r := _require_db()):
+        return r
+    cand = db.CandidateRepo.get(cid)
+    if not cand:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"phone": cand.get("phone"), "has_phone": bool(cand.get("has_phone"))})
+
+
+@app.post("/api/people/<int:cid>/ai-refresh")
+@require_auth
+def api_person_ai_refresh(cid):
+    """Regenerate the AI recruiter brief on demand (re-runs OpenAI / deterministic)."""
+    if (r := _require_db()):
+        return r
+    cand = db.CandidateRepo.get(cid)
+    if not cand:
+        return jsonify({"error": "not_found"}), 404
+    company = db.CompanyRepo.get(cand["company_id"]) if cand.get("company_id") else None
+    res = core.generate_candidate_paragraph(cand, company)
+    if res.get("paragraph"):
+        db.CandidateRepo.set_ai_paragraph(cid, res["paragraph"], res.get("source") or "")
+    return jsonify({"ok": True, "ai_paragraph": res.get("paragraph"), "ai_paragraph_source": res.get("source")})
+
+
+@app.get("/api/score-explanations")
+@require_auth
+def api_score_explanations():
+    """Plain-language derivation of every score — powers the 'i' explainer buttons."""
+    return jsonify(core.SCORE_EXPLANATIONS)
+
+
+@app.get("/api/diag/phone")
+@require_auth
+def api_diag_phone():
+    """Diagnostics for the async phone flow: shows the exact webhook URL Apollo would be told to
+    call (must be a PUBLIC https URL), whether the token is set, and the last phone attempts."""
+    tok = core.apollo_webhook_token()
+    webhook_url = (request.host_url.rstrip("/") + "/api/apollo-phone-webhook?token=" + tok) if tok else ""
+    return jsonify({
+        "webhook_url": webhook_url,
+        "webhook_token_set": bool(tok),
+        "host_url": request.host_url,
+        "is_public_https": request.host_url.startswith("https://") and "localhost" not in request.host_url
+                           and "127.0.0.1" not in request.host_url,
+        "apollo_configured": bool(getattr(core.get_apollo(), "api_key", "")),
+        "phones_in_db": db.CandidateRepo.phone_populated_count(),
+        "recent_phone_attempts": db.EnrichmentLogRepo.recent_phone_attempts(10),
+    })
 
 
 @app.get("/api/companies")
