@@ -226,21 +226,48 @@ class ApolloClient:
                     "_phone_reveal_error": phone_reveal_error}
 
         self.counter["match"] += 1
-        person = (resp.json() or {}).get("person") or {}
+        data = resp.json() or {}
+        person = data.get("person") or {}
         org = person.get("organization") or {}
         co_phone = safe_str(org.get("phone") or org.get("sanitized_phone"))
         pp = org.get("primary_phone")
         if not co_phone and isinstance(pp, dict):
             co_phone = safe_str(pp.get("number") or pp.get("sanitized_number"))
+        phone_requested = ("reveal_phone_number" in payload)
         return {
             "_ok": True, "_http_status": 200, "_retried": retried,
             "_phone_reveal_error": phone_reveal_error,
-            "_phone_requested": ("reveal_phone_number" in payload) or bool(webhook_url and not phone_reveal_error),
+            "_phone_requested": phone_requested or bool(webhook_url and not phone_reveal_error),
+            # Apollo returns a request_id for async phone reveals — capture it so we can POLL
+            # GET /webhook_result/{request_id} later (reliable even if the webhook never reaches us).
+            "_phone_request_id": (safe_str(data.get("request_id")) if phone_requested else ""),
             "email": _best_email(person, first_name, last_name),
             "phone": _best_phone(person, co_phone),
             "employment_history": person.get("employment_history") or [],
             "person": person,
         }
+
+    def poll_webhook_result(self, request_id: str) -> Optional[dict]:
+        """Poll Apollo for an async reveal result: GET /api/v1/webhook_result/{request_id}.
+        This is the RELIABLE phone path — we pull the result ourselves instead of waiting for
+        Apollo's webhook to reach our server. Returns the JSON payload (same shape as the
+        webhook: {status, people:[{phone_numbers:[...]}]}) or None if not ready / on error.
+        Results are retained ~30 days by Apollo. Costs no extra credits (already spent)."""
+        if not request_id:
+            return None
+        try:
+            self.limiter.wait()
+            resp = requests.get(f"{self.BASE_URL}/webhook_result/{request_id}",
+                                headers=self._headers(), timeout=25)
+        except Exception as e:
+            log.warning("poll_webhook_result network error (%s): %s", request_id, e)
+            return None
+        if resp is None or resp.status_code != 200:
+            return None
+        try:
+            return resp.json() or None
+        except Exception:
+            return None
 
     def credits_remaining(self) -> int:
         """Best-effort credit balance. Returns -1 on any failure (never blocks)."""
@@ -1066,9 +1093,10 @@ SCORE_EXPLANATIONS = {
                     "Generic keywords (+3 each)", "Engineering/marketing function bonus"]},
     "company_quality": {
         "summary": "Quality of the person's current employer — a blend of company size, "
-                   "revenue and longevity, with a bonus for marketing-adjacent and tech industries.",
+                   "revenue and longevity, plus bonuses for a live website and a "
+                   "marketing-adjacent/tech industry.",
         "factors": ["Size 40%", "Revenue 35%", "Company age 25%",
-                    "Industry/website bonuses"]},
+                    "Live website (+8)", "Relevant industry (+5)"]},
     "freshness": {
         "summary": "How recent the underlying data is. Verified within 7 days scores full; "
                    "older data decays toward a floor.",
@@ -1252,7 +1280,9 @@ def score_company_quality(org: dict) -> int:
     else:
         years = max(0, now_utc().year - fy)
         age_pts = 45 if years < 2 else 60 if years <= 5 else 78 if years <= 15 else 85
-    website_pts = 5 if (org.get("website_url") or org.get("root_domain")) else 0
+    # A live, resolvable website is a real quality signal for a lead (reachable, legitimate
+    # business) — weighted meaningfully so company grade reflects it.
+    website_pts = 8 if (org.get("website_url") or org.get("root_domain")) else 0
     industry_pts = 5 if str(org.get("industry") or "").lower() in (
         "marketing & advertising", "marketing and advertising", "internet",
         "computer software", "information technology & services") else 0
@@ -1519,6 +1549,90 @@ def generate_candidate_paragraph(cand: dict, company: Optional[dict] = None) -> 
     except Exception as e:
         log.warning("ai paragraph failed (%s) — using deterministic", e)
     return {"paragraph": _deterministic_paragraph(f), "source": "derived"}
+
+
+def _company_facts(company: dict) -> dict:
+    """Grounding facts for the company summary — from the company row + the real services its
+    tracked employees perform (a free proxy for 'solutions'). No invented data."""
+    cid = company.get("id")
+    cats = []
+    if cid:
+        try:
+            cats = db.CandidateRepo.top_categories_for_company(cid, 4)
+        except Exception:
+            cats = []
+    founded = company.get("founded_year")
+    age_years = None
+    if isinstance(founded, int) and 1900 < founded <= now_utc().year:
+        age_years = now_utc().year - founded
+    return {
+        "name": company.get("name"),
+        "website": company.get("root_domain") or company.get("website_url"),
+        "industry": company.get("industry"),
+        "homepage_about": company.get("description"),   # real meta/og text from their site
+        "founded_year": founded if isinstance(founded, int) else None,
+        "years_in_business": age_years,
+        "employee_band": company.get("size_band"),
+        "estimated_employees": company.get("estimated_employees"),
+        "country": company.get("country") or company.get("hq_country"),
+        "team_disciplines": cats,   # what their people actually do → their solutions/services
+    }
+
+
+def _deterministic_company_summary(f: dict) -> str:
+    """Always-available company blurb from facts (no OpenAI needed)."""
+    name = f.get("name") or "This company"
+    bits = []
+    lead = name
+    if f.get("industry"):
+        lead += f" operates in {f['industry']}"
+    elif f.get("team_disciplines"):
+        lead += f" works across {', '.join(f['team_disciplines'][:3])}"
+    if f.get("country"):
+        lead += f", based in {f['country']}"
+    bits.append(lead.strip() + ".")
+    if f.get("years_in_business"):
+        bits.append(f"In business ~{f['years_in_business']} years (founded {f.get('founded_year')}).")
+    elif f.get("founded_year"):
+        bits.append(f"Founded {f['founded_year']}.")
+    if f.get("homepage_about"):
+        bits.append(str(f["homepage_about"]).strip().rstrip(".") + ".")
+    if f.get("team_disciplines"):
+        bits.append(f"Tracked team strengths: {', '.join(f['team_disciplines'][:4])}.")
+    if f.get("employee_band"):
+        bits.append(f"Team size: {f['employee_band']}.")
+    return " ".join(b for b in bits if b)[:700] or f"{name}."
+
+
+def generate_company_summary(company: dict) -> dict:
+    """Short 'what this company does, how long it's been around, and its solutions' summary for
+    the company view. Uses gpt-4o-mini when available (strictly grounded in the provided facts,
+    no invention), else a deterministic blurb. Returns {summary, source}."""
+    if not company or not company.get("name"):
+        return {"summary": "", "source": "derived"}
+    f = _company_facts(company)
+    if not openai_available():
+        return {"summary": _deterministic_company_summary(f), "source": "derived"}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        sysmsg = ("You are a B2B analyst writing a SHORT company snapshot for a recruiter. Use ONLY "
+                  "the provided facts (company row + homepage text + the disciplines its employees "
+                  "work in) — NEVER invent products, clients, revenue, history or numbers. Write 2-3 "
+                  "plain sentences covering: what the company does, how long it has been operating "
+                  "(only if a founded year/age is given), and the solutions/services it offers "
+                  "(infer the service mix from team_disciplines + homepage_about, but do not fabricate "
+                  'specific named products). Return STRICT JSON: {"summary":"<the snapshot>"}.')
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0.3, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": sysmsg},
+                      {"role": "user", "content": json.dumps(f, default=str)}], timeout=30)
+        summ = (json.loads(resp.choices[0].message.content).get("summary") or "").strip()
+        if summ:
+            return {"summary": summ[:900], "source": "ai"}
+    except Exception as e:
+        log.warning("ai company summary failed (%s) — using deterministic", e)
+    return {"summary": _deterministic_company_summary(f), "source": "derived"}
 
 
 def _apply_ai_nudge(scores: dict, ai_meta: dict) -> dict:
@@ -1910,7 +2024,11 @@ def backfill_company_domains(limit: int = 50, logf=None) -> int:
     rows = db.CompanyRepo.missing_domain(limit)
     found = 0
     for r in rows:
-        d = resolve_company_domain(r.get("name") or "")
+        # FREE first: many company rows have NULL root_domain while their own candidates carry
+        # a company_domain (from discovery) — recover it before spending a Clearbit lookup. This
+        # is the main reason the website box stayed "pending" for companies that clearly have one.
+        d = db.CompanyRepo.domain_from_candidates(r["id"]) or resolve_company_domain(r.get("name") or "")
+        d = normalize_domain(d) if d else None
         website = f"https://{d}" if d else None
         try:
             db.CompanyRepo.set_domain(r["id"], d, website)
@@ -2142,6 +2260,14 @@ def enrich_candidate(candidate_id: int, reveal_email: bool = True,
         seniority=seniority, linkedin_url=linkedin, location_country=country,
         employment_history=emp, intent_score=intent, intent_source=intent_source,
         scores_json=scores_json, overall=overall, company_quality=company_quality)
+
+    # Phone is async — if we requested it and it didn't come back synchronously, persist the
+    # request_id so the reconciler can poll Apollo's webhook_result endpoint and fill it in.
+    if reveal_phone and not phone and res.get("_phone_request_id"):
+        try:
+            db.CandidateRepo.set_phone_request(candidate_id, res["_phone_request_id"])
+        except Exception as e:
+            log.warning("set_phone_request failed (%s): %s", candidate_id, e)
 
     # Opportunistically enrich the company's firmographics (domain, employees, etc.)
     # now that people/match exposed them — Company View improves for FREE on every reveal.
@@ -2743,20 +2869,83 @@ def reveal_phone_only(candidate_id: int, webhook_url: str = "") -> dict:
     if not res.get("_ok"):
         return {"ok": False, "error": "apollo_failed", "detail": res.get("_phone_reveal_error")}
     phone = res.get("phone")  # occasionally present synchronously
-    if phone and row.get("apollo_person_id"):
+    if phone:
         try:
-            db.CandidateRepo.set_phone_by_apollo_id(str(row.get("apollo_person_id")), phone)
+            db.CandidateRepo.set_phone(candidate_id, phone)
         except Exception as e:
             log.warning("reveal_phone_only set failed: %s", e)
         return {"ok": True, "phone": phone, "phone_pending": False,
                 "candidate": db.CandidateRepo.get(candidate_id)}
-    # Apollo rejected the phone reveal (e.g. webhook unreachable / not entitled) — report it.
+    # Apollo rejected the phone reveal (e.g. not entitled) — report it.
     if res.get("_phone_reveal_error"):
         return {"ok": False, "error": "phone_reveal_rejected",
                 "detail": res.get("_phone_reveal_error")}
-    return {"ok": True, "phone": None, "phone_pending": bool(webhook_url),
-            "message": ("Mobile requested — Apollo delivers it via webhook in ~1–3 min; refresh."
-                        if webhook_url else "Phone webhook unavailable (set APP_PASSWORD or SECRET_KEY).")}
+    # Async path: record the request_id so the reconciler can POLL Apollo for the number
+    # (works even if the inbound webhook never reaches us). This is the reliable fix.
+    rid = res.get("_phone_request_id")
+    if rid:
+        try:
+            db.CandidateRepo.set_phone_request(candidate_id, rid)
+        except Exception as e:
+            log.warning("reveal_phone_only set_phone_request failed: %s", e)
+    return {"ok": True, "phone": None, "phone_pending": bool(rid or webhook_url),
+            "message": ("Mobile requested — Apollo reveals it async; it’s auto-filled within "
+                        "a few minutes (no refresh needed)." if (rid or webhook_url)
+                        else "Phone reveal unavailable — check Apollo entitlement.")}
+
+
+def reconcile_pending_phones(limit: int = 25) -> int:
+    """Pull async phone reveals that Apollo has finished, by POLLING
+    GET /api/v1/webhook_result/{request_id} for every candidate still awaiting a number.
+    This is the RELIABLE delivery path — it does not depend on Apollo's webhook reaching us,
+    so phones land even when the inbound webhook is blocked/misconfigured. FREE (no new credit;
+    the reveal was already paid). Returns how many phones were filled. Safe to call every tick."""
+    apollo = get_apollo()
+    if not getattr(apollo, "api_key", ""):
+        return 0
+    try:
+        rows = db.CandidateRepo.pending_phone_requests(limit)
+    except Exception as e:
+        log.warning("pending_phone_requests failed: %s", e)
+        return 0
+    filled = 0
+    for r in rows:
+        rid = r.get("phone_request_id")
+        cid = r.get("id")
+        data = apollo.poll_webhook_result(rid)
+        if not isinstance(data, dict):
+            continue  # not ready yet — try again next tick
+        people = data.get("people") or data.get("contacts") or []
+        if isinstance(people, dict):
+            people = [people]
+        phone = None
+        for p in people:
+            if isinstance(p, dict):
+                phone = _best_phone(p)
+                if phone:
+                    break
+        status = str(data.get("status") or "").lower()
+        if phone:
+            try:
+                if db.CandidateRepo.set_phone(cid, phone):
+                    filled += 1
+                    log.info("phone reconciler: filled phone for candidate %s (req %s)", cid, rid)
+                else:
+                    db.CandidateRepo.clear_phone_pending(cid)
+            except Exception as e:
+                log.warning("phone reconciler set failed (%s): %s", cid, e)
+        elif status in ("success", "complete", "completed", "finished") or data.get("people") is not None:
+            # Apollo finished but found no phone for this person — stop polling it.
+            try:
+                db.CandidateRepo.clear_phone_pending(cid)
+            except Exception:
+                pass
+    # Abandon requests too old to ever resolve.
+    try:
+        db.CandidateRepo.expire_stale_phone_pending(_env_int("PHONE_RECONCILE_MAX_AGE_HOURS", 48))
+    except Exception:
+        pass
+    return filled
 
 
 def coresignal_status() -> dict:
@@ -2814,12 +3003,15 @@ def rescore_candidate(candidate_id: int, target_families: Optional[List[str]] = 
     company = db.CompanyRepo.get(row["company_id"]) if row.get("company_id") else None
     title = row.get("title") or ""
     headline = row.get("headline") or ""
-    org = {"name": row.get("company_name"), "root_domain": row.get("company_domain"),
+    # Prefer the company's own resolved domain (set by the website backfill) over the
+    # candidate's, so a now-known website feeds the company-quality score on re-process.
+    root_domain = (company or {}).get("root_domain") or row.get("company_domain")
+    org = {"name": row.get("company_name"), "root_domain": root_domain,
            "industry": (company or {}).get("industry"),
            "estimated_employees": (company or {}).get("estimated_employees"),
            "annual_revenue": (company or {}).get("annual_revenue"),
            "founded_year": (company or {}).get("founded_year"),
-           "website_url": (company or {}).get("website_url")}
+           "website_url": (company or {}).get("website_url") or (f"https://{root_domain}" if root_domain else None)}
     base = {"title": title, "headline": headline, "seniority": row.get("seniority") or "",
             "functions": [], "departments": row.get("departments_json") or [], "_org": org,
             "employment_history": row.get("employment_history_json") or [],
@@ -2828,7 +3020,10 @@ def rescore_candidate(candidate_id: int, target_families: Optional[List[str]] = 
     dept = CATEGORY_DEPT.get(category) if category else None
     if not dept:
         dept = classify_department(title, headline, row.get("departments_json") or [], [])
-    cq = score_company_quality(org) if org.get("estimated_employees") else (row.get("company_quality_score") or 50)
+    # Recompute company quality whenever we have a size OR a resolved website (website is now a
+    # graded signal); otherwise keep the stored value rather than regressing to a guess.
+    cq = score_company_quality(org) if (org.get("estimated_employees") or org.get("root_domain")) \
+        else (row.get("company_quality_score") or 50)
     technical = score_technical(base)
     role_fit = score_role_fit(base, target_families)
     intent, intent_source, intent_signals = compute_intent(base)
@@ -2872,34 +3067,53 @@ def roster_reprocess_batch(limit: int = 2, logf=None) -> dict:
     each due company refresh free firmographics (domain + homepage 'About'), re-score &
     re-classify every attached candidate, then set the authoritative company category."""
     companies = db.CompanyRepo.reprocess_pending(limit)
-    n_co = n_cand = 0
+    n_co = n_cand = n_web = n_sum = 0
     for co in companies:
         try:
+            # 1) Resolve the website — FREE from candidates first (fixes "pending"), then Clearbit.
             if not co.get("root_domain"):
-                d = resolve_company_domain(co.get("name") or "")
+                d = db.CompanyRepo.domain_from_candidates(co["id"]) or resolve_company_domain(co.get("name") or "")
+                d = normalize_domain(d) if d else None
                 if d:
                     db.CompanyRepo.set_domain(co["id"], d, f"https://{d}")
                     co["root_domain"] = d
+            # 2) Pull the homepage 'About' text (grounds both category + AI summary).
             if co.get("root_domain") and not co.get("description"):
                 info = fetch_company_web(co["root_domain"])
-                db.CompanyRepo.set_web(co["id"], info.get("description"), info.get("og_image"))
+                if info.get("description"):
+                    db.CompanyRepo.set_web(co["id"], info.get("description"), info.get("og_image"))
+                    co["description"] = info.get("description")
+                    n_web += 1
         except Exception as e:
             log.warning("reprocess firmographics %s: %s", co.get("id"), e)
+        # 3) Re-score & re-classify every candidate (website now feeds company quality).
         for cand in db.CandidateRepo.for_company(co["id"], limit=10000):
             try:
                 if rescore_candidate(cand["id"]):
                     n_cand += 1
             except Exception as e:
                 log.warning("rescore %s: %s", cand.get("id"), e)
+        # 4) Authoritative company category (needs candidate categories from step 3).
         try:
             recompute_company_category(co["id"])
         except Exception as e:
             log.warning("recompute_company_category %s: %s", co.get("id"), e)
+        # 5) OpenAI company summary (what it does / how long / solutions) — cached on the row.
+        try:
+            if not co.get("ai_summary"):
+                fresh = db.CompanyRepo.get(co["id"]) or co
+                res = generate_company_summary(fresh)
+                if res.get("summary"):
+                    db.CompanyRepo.set_ai_summary(co["id"], res["summary"], res.get("source") or "")
+                    n_sum += 1
+        except Exception as e:
+            log.warning("company summary %s: %s", co.get("id"), e)
         db.CompanyRepo.mark_reprocessed(co["id"])
         n_co += 1
     if logf and companies:
-        logf(f"Re-process: upgraded {n_cand} candidates across {n_co} companies")
-    return {"companies": n_co, "candidates": n_cand}
+        logf(f"Re-process: {n_cand} candidates upgraded · {n_web} websites · {n_sum} summaries "
+             f"across {n_co} companies")
+    return {"companies": n_co, "candidates": n_cand, "websites": n_web, "summaries": n_sum}
 
 
 def roster_reprocess_enabled() -> bool:
@@ -2989,6 +3203,17 @@ def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
             if due:
                 db.CandidateRepo.recompute_freshness_all(_env_int("HR_INTENT_OPEN_THRESHOLD", 60))
                 db.SettingsRepo.set("freshness_at", now_utc().isoformat())
+
+            # Reliably deliver async phone reveals by POLLING Apollo's webhook_result endpoint
+            # for every candidate awaiting a number (free; works even if the inbound webhook is
+            # blocked). This is the real fix for "Get mobile never arrives".
+            if _env("PHONE_RECONCILE_ENABLED", "1") == "1":
+                try:
+                    got = reconcile_pending_phones(_env_int("PHONE_RECONCILE_PER_TICK", 25))
+                    if got:
+                        log.info("phone reconciler: filled %d mobile number(s)", got)
+                except Exception as e:
+                    log.warning("phone reconcile error: %s", e)
 
             # Progressively resolve company websites (free Clearbit), paced every tick.
             try:

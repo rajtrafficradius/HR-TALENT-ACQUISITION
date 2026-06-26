@@ -450,6 +450,13 @@ _MIGRATIONS = (
     ("companies", "category", "ALTER TABLE companies ADD COLUMN category VARCHAR(64) NULL"),
     ("companies", "category_source", "ALTER TABLE companies ADD COLUMN category_source VARCHAR(16) NULL"),
     ("companies", "reprocessed_at", "ALTER TABLE companies ADD COLUMN reprocessed_at DATETIME NULL"),
+    ("companies", "ai_summary", "ALTER TABLE companies ADD COLUMN ai_summary TEXT NULL"),
+    ("companies", "ai_summary_source", "ALTER TABLE companies ADD COLUMN ai_summary_source VARCHAR(16) NULL"),
+    # Async phone reveal: store Apollo's request_id so we can POLL /webhook_result/{id}
+    # (the reliable path — does not depend on Apollo's webhook reaching us).
+    ("candidates", "phone_request_id", "ALTER TABLE candidates ADD COLUMN phone_request_id VARCHAR(64) NULL"),
+    ("candidates", "phone_pending", "ALTER TABLE candidates ADD COLUMN phone_pending TINYINT(1) NOT NULL DEFAULT 0"),
+    ("candidates", "phone_requested_at", "ALTER TABLE candidates ADD COLUMN phone_requested_at DATETIME NULL"),
 )
 _MIGRATION_INDEXES = (
     ("companies", "idx_company_webchk", "ALTER TABLE companies ADD KEY idx_company_webchk (web_checked)"),
@@ -463,6 +470,7 @@ _MIGRATION_INDEXES = (
     ("companies", "idx_company_size", "ALTER TABLE companies ADD KEY idx_company_size (estimated_employees)"),
     ("companies", "idx_company_band", "ALTER TABLE companies ADD KEY idx_company_band (size_band)"),
     ("companies", "idx_company_domchk", "ALTER TABLE companies ADD KEY idx_company_domchk (domain_checked)"),
+    ("candidates", "idx_cand_phpending", "ALTER TABLE candidates ADD KEY idx_cand_phpending (phone_pending)"),
 )
 
 
@@ -825,14 +833,41 @@ class CompanyRepo:
             conn.commit()
 
     @staticmethod
+    def set_ai_summary(company_id: int, summary: str, source: str) -> None:
+        """Cache the OpenAI 'what this company does' summary on the row."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET ai_summary=%s, ai_summary_source=%s WHERE id=%s",
+                            ((summary or "")[:1200], (source or "")[:16], company_id))
+            conn.commit()
+
+    @staticmethod
+    def domain_from_candidates(company_id: int) -> Optional[str]:
+        """Recover a company's website from its candidates' company_domain (free data already
+        in the DB) — many company rows have NULL root_domain while their people carry it. This
+        is why the website box stayed 'pending'."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT company_domain FROM candidates WHERE company_id=%s "
+                            "AND company_domain IS NOT NULL AND company_domain<>'' "
+                            "GROUP BY company_domain ORDER BY COUNT(*) DESC LIMIT 1", (company_id,))
+                r = cur.fetchone()
+        return (r["company_domain"] if r else None) or None
+
+    @staticmethod
     def reprocess_pending(limit: int = 2) -> List[dict]:
-        """Companies due for a quality re-process (never done, or done >30 days ago), most
-        populated first so the highest-value companies are upgraded first."""
+        """Companies due for a quality re-process. Picks up: never-done, done >30 days ago, OR
+        already-done-but-missing-the-newer-quality-fields (no website yet, or has a website but
+        no AI summary) — so enabling re-process backfills website + company summary across the
+        whole DB. Most-populated first so the highest-value companies upgrade first."""
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, name, root_domain, description, industry FROM companies "
+                    "SELECT id, name, root_domain, description, industry, ai_summary, "
+                    "founded_year, estimated_employees, size_band, category FROM companies "
                     "WHERE reprocessed_at IS NULL OR reprocessed_at < (NOW() - INTERVAL 30 DAY) "
+                    "OR domain_checked=0 "
+                    "OR (root_domain IS NOT NULL AND (ai_summary IS NULL OR ai_summary='')) "
                     "ORDER BY reprocessed_at IS NOT NULL, "
                     "(SELECT COUNT(*) FROM candidates c WHERE c.company_id=companies.id) DESC LIMIT %s",
                     (limit,))
@@ -1188,11 +1223,71 @@ class CandidateRepo:
             return False
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("UPDATE candidates SET phone=%s WHERE apollo_person_id=%s "
+                cur.execute("UPDATE candidates SET phone=%s, phone_pending=0 WHERE apollo_person_id=%s "
                             "AND (phone IS NULL OR phone='')", (phone[:64], apollo_person_id))
                 n = cur.rowcount
             conn.commit()
         return n > 0
+
+    @staticmethod
+    def set_phone(candidate_id: int, phone: str) -> bool:
+        """Write a revealed phone onto ONE candidate by id (used by the webhook_result poller),
+        clearing the pending flag. Won't overwrite an existing number. Returns True if updated."""
+        if not (candidate_id and phone):
+            return False
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE candidates SET phone=%s, phone_pending=0 WHERE id=%s "
+                            "AND (phone IS NULL OR phone='')", (phone[:64], candidate_id))
+                n = cur.rowcount
+            conn.commit()
+        return n > 0
+
+    @staticmethod
+    def set_phone_request(candidate_id: int, request_id: str) -> None:
+        """Record Apollo's async phone request_id so the reconciler can later poll
+        GET /api/v1/webhook_result/{request_id} and pull the number — the reliable path
+        that does NOT depend on Apollo's webhook reaching our server."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE candidates SET phone_request_id=%s, phone_pending=1, "
+                            "phone_requested_at=NOW() WHERE id=%s",
+                            ((request_id or "")[:64], candidate_id))
+            conn.commit()
+
+    @staticmethod
+    def pending_phone_requests(limit: int = 25, max_age_hours: int = 48) -> List[dict]:
+        """Candidates awaiting an async phone, with a request_id to poll and no number yet.
+        Oldest first; abandons requests older than max_age_hours (results expire on Apollo)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, phone_request_id, apollo_person_id "
+                    "FROM candidates WHERE phone_pending=1 AND phone_request_id IS NOT NULL "
+                    "AND phone_request_id<>'' AND (phone IS NULL OR phone='') "
+                    "AND phone_requested_at > (NOW() - INTERVAL %s HOUR) "
+                    "ORDER BY phone_requested_at ASC LIMIT %s", (int(max_age_hours), int(limit)))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def clear_phone_pending(candidate_id: int) -> None:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE candidates SET phone_pending=0 WHERE id=%s", (candidate_id,))
+            conn.commit()
+
+    @staticmethod
+    def expire_stale_phone_pending(max_age_hours: int = 48) -> int:
+        """Stop polling requests too old to ever resolve (Apollo retains results ~30 days, but
+        if nothing arrived in 2 days it never will). Returns rows cleared."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE candidates SET phone_pending=0 WHERE phone_pending=1 "
+                            "AND (phone_requested_at IS NULL OR "
+                            "phone_requested_at <= (NOW() - INTERVAL %s HOUR))", (int(max_age_hours),))
+                n = cur.rowcount
+            conn.commit()
+        return int(n)
 
     @staticmethod
     def apply_rescore(candidate_id: int, *, category, department, technical, role_fit, intent,
@@ -1223,6 +1318,17 @@ class CandidateRepo:
                             "GROUP BY category ORDER BY w DESC LIMIT 1", (company_id,))
                 r = cur.fetchone()
         return r["category"] if r else None
+
+    @staticmethod
+    def top_categories_for_company(company_id: int, limit: int = 4) -> List[str]:
+        """The disciplines a company's tracked employees work in (most common first) — a free
+        proxy for the company's services/solutions, used to ground the company AI summary."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT category, COUNT(*) AS c FROM candidates "
+                            "WHERE company_id=%s AND category IS NOT NULL AND category<>'' "
+                            "GROUP BY category ORDER BY c DESC LIMIT %s", (company_id, int(limit)))
+                return [r["category"] for r in (cur.fetchall() or []) if r.get("category")]
 
     @staticmethod
     def phone_populated_count() -> int:

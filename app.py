@@ -331,7 +331,9 @@ def api_person(cid):
     eh = cand.get("employment_history_json") or []
     if isinstance(eh, list) and eh:
         cur_key = (company or {}).get("company_key") or core.company_key_for(cand.get("company_name") or "")
-        pairs = []
+        # Group by company so each past employer appears ONCE — multiple roles become sub-points.
+        grouped = {}
+        order = []
         for e in eh:
             if not isinstance(e, dict):
                 continue
@@ -341,13 +343,27 @@ def api_person(cid):
             key = core.company_key_for(nm)
             if e.get("current") or not key or key == cur_key:
                 continue  # skip the current employer (already shown above)
-            pairs.append((e, key))
-        idmap = db.CompanyRepo.ids_by_keys([k for _, k in pairs]) if pairs else {}
-        for e, key in pairs:
+            role = {"title": e.get("title"), "start_date": e.get("start_date"),
+                    "end_date": e.get("end_date")}
+            if key not in grouped:
+                grouped[key] = {"name": nm, "roles": [role],
+                                "start_date": e.get("start_date"), "end_date": e.get("end_date")}
+                order.append(key)
+            else:
+                g = grouped[key]
+                g["roles"].append(role)
+                # widen the span: earliest start, latest end
+                if e.get("start_date") and (not g["start_date"] or str(e["start_date"]) < str(g["start_date"])):
+                    g["start_date"] = e["start_date"]
+                if not e.get("end_date") or (g["end_date"] and str(e.get("end_date") or "") > str(g["end_date"])):
+                    g["end_date"] = e.get("end_date")
+        idmap = db.CompanyRepo.ids_by_keys(order) if order else {}
+        for key in order:
+            g = grouped[key]
             past_companies.append({
-                "name": e.get("organization_name"), "title": e.get("title"),
-                "start_date": e.get("start_date"), "end_date": e.get("end_date"),
-                "current": bool(e.get("current")), "company_id": idmap.get(key)})
+                "name": g["name"], "title": g["roles"][0].get("title"),
+                "roles": g["roles"], "start_date": g["start_date"], "end_date": g["end_date"],
+                "current": False, "company_id": idmap.get(key)})
 
     # AI recruiter brief (paragraph) — generated once, then cached on the row.
     ai_paragraph = cand.get("ai_paragraph")
@@ -446,6 +462,27 @@ def api_company(coid):
         return jsonify({"error": "not_found"}), 404
     if not company.get("industry"):
         company["industry_derived"] = core.derive_industry(coid)
+    # Website fallback: if the company row has no domain but its people carry one, surface it so
+    # the website box stops showing "pending" (and persist it for next time, free).
+    if not company.get("root_domain"):
+        d = db.CompanyRepo.domain_from_candidates(coid)
+        if d:
+            company["root_domain"] = d
+            company["website_url"] = company.get("website_url") or ("https://" + d)
+            try:
+                db.CompanyRepo.set_domain(coid, d, company["website_url"])
+            except Exception:
+                pass
+    # OpenAI company summary (what it does / how long / solutions) — generate once, then cache.
+    if not company.get("ai_summary"):
+        try:
+            res = core.generate_company_summary(company)
+            if res.get("summary"):
+                company["ai_summary"] = res["summary"]
+                company["ai_summary_source"] = res.get("source")
+                db.CompanyRepo.set_ai_summary(coid, res["summary"], res.get("source") or "")
+        except Exception:
+            pass
     return jsonify({"company": company, "people": db.CandidateRepo.for_company(coid)})
 
 
