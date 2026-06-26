@@ -101,6 +101,20 @@ try:
     n = db.RunRepo.reconcile_stuck()
     if n:
         log.info("Reconciled %d stuck 'running' run(s) on boot", n)
+    # One-shot data migrations (run once on the Railway host where the DB is local & fast):
+    #  (1) consolidate every stored category to the 12-taxonomy; (2) drop clearly-irrelevant
+    #  companies (schools, textiles/garments, banks, mega-corps). Each guarded by a settings flag.
+    try:
+        if db.SettingsRepo.get("cat12_migrated") != "1":
+            r = core.migrate_categories_to_12()
+            db.SettingsRepo.set("cat12_migrated", "1")
+            log.info("cat12 migration: remapped %d candidates / %d companies", r["candidates"], r["companies"])
+        if db.SettingsRepo.get("irrelevant_cleaned_v2") != "1":
+            removed = core.cleanup_hard_blocked_companies()
+            db.SettingsRepo.set("irrelevant_cleaned_v2", "1")
+            log.info("irrelevant cleanup: removed %d clearly-irrelevant companies", removed)
+    except Exception as e:
+        log.warning("startup data migration skipped (will retry next boot): %s", e)
     _db_ready = True
     log.info("Database ready.")
 except Exception as e:
@@ -760,6 +774,44 @@ def api_roster_reprocess_toggle():
         return jsonify({"ok": True, "ran": ran, **core.roster_reprocess_status()})
     core.set_roster_reprocess(bool(data.get("enabled")))
     return jsonify({"ok": True, **core.roster_reprocess_status()})
+
+
+@app.get("/api/admin/cleanup-preview")
+@require_auth
+def api_cleanup_preview():
+    """Dry-run: how many companies the cleanup would remove, with a sample (no deletion)."""
+    if (r := _require_db()):
+        return r
+    rows = db.CompanyRepo.all_id_name(100000)
+    hard = [r["name"] for r in rows if core.is_hard_blocked(r.get("name") or "")]
+    soft = [r["name"] for r in rows if not core.is_relevant_company(r.get("name") or "")
+            and not core.is_hard_blocked(r.get("name") or "")]
+    return jsonify({"total_companies": len(rows),
+                    "hard_block_remove": len(hard), "hard_sample": hard[:40],
+                    "relevance_filter_remove": len(soft), "relevance_sample": soft[:40]})
+
+
+@app.post("/api/admin/cleanup-companies")
+@require_auth
+def api_cleanup_companies():
+    """Delete irrelevant companies + their candidates. mode=hard (default, conservative name block)
+    or mode=relevance (also drops soft-blocked names without an agency/marketing allow-signal)."""
+    if (r := _require_db()):
+        return r
+    mode = (request.get_json(silent=True) or {}).get("mode", "hard")
+    removed = core.cleanup_irrelevant_companies() if mode == "relevance" \
+        else core.cleanup_hard_blocked_companies()
+    return jsonify({"ok": True, "mode": mode, "removed": removed})
+
+
+@app.post("/api/admin/recategorize")
+@require_auth
+def api_recategorize():
+    """Re-run the 28→12 category consolidation across all candidate + company rows."""
+    if (r := _require_db()):
+        return r
+    res = core.migrate_categories_to_12()
+    return jsonify({"ok": True, **res})
 
 
 @app.get("/api/runs")

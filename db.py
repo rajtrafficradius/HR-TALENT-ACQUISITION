@@ -825,6 +825,21 @@ class CompanyRepo:
                 return {r["category"]: int(r["c"]) for r in (cur.fetchall() or [])}
 
     @staticmethod
+    def remap_categories(merge_map: Dict[str, str]) -> int:
+        """Bulk-relabel company categories per a {old: new} map (the 28→12 consolidation)."""
+        pairs = [(o, n) for o, n in (merge_map or {}).items() if o and n and o != n]
+        if not pairs:
+            return 0
+        total = 0
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                for old, new in pairs:
+                    cur.execute("UPDATE companies SET category=%s WHERE category=%s", (new, old))
+                    total += cur.rowcount
+            conn.commit()
+        return int(total)
+
+    @staticmethod
     def set_category(company_id: int, category: str, source: str) -> None:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -1306,6 +1321,22 @@ class CandidateRepo:
                      int(company_quality), int(freshness), int(overall), intent_source,
                      _dumps(scores_json), int(intent), thr, candidate_id))
             conn.commit()
+
+    @staticmethod
+    def remap_categories(merge_map: Dict[str, str]) -> int:
+        """Bulk-relabel candidate categories per a {old: new} map (the 28→12 consolidation).
+        One indexed equality UPDATE per changed label. Idempotent. Returns rows changed."""
+        pairs = [(o, n) for o, n in (merge_map or {}).items() if o and n and o != n]
+        if not pairs:
+            return 0
+        total = 0
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                for old, new in pairs:
+                    cur.execute("UPDATE candidates SET category=%s WHERE category=%s", (new, old))
+                    total += cur.rowcount
+            conn.commit()
+        return int(total)
 
     @staticmethod
     def weighted_dominant_category(company_id: int) -> Optional[str]:

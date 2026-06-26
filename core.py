@@ -802,101 +802,117 @@ def classify_department(title: str = "", headline: str = "", departments: Option
     return "other"
 
 
-# ── Fine-grained category taxonomy (28 categories in 6 groups) ───────────────
+# ── Category taxonomy: 12 consolidated categories in 4 UI groups ─────────────
 # Each: label, dept (coarse enum), group (UI), kw (q_keywords), titles[] (Apollo
-# person_titles), match[] (classification tokens). ORDER = specific → general so
-# classify_category() returns the most specific match first.
+# person_titles for discovery), match[] (classification tokens). ORDER = specific →
+# general so classify_category() returns the most specific match first (e.g. a
+# "Digital Marketing Manager" matches Digital Marketing before the catch-all Marketing
+# & Branding). Each category's titles[] is the UNION of its merged sub-roles, so
+# discovery still searches every specific title — only the labelling is consolidated.
 CATEGORIES = [
-    {"label": "Technical SEO", "dept": "seo", "group": "SEO", "kw": "technical SEO",
-     "titles": ["Technical SEO Specialist", "Technical SEO Manager", "SEO Developer"],
-     "match": ["technical seo"]},
-    {"label": "Local SEO", "dept": "seo", "group": "SEO", "kw": "local SEO",
-     "titles": ["Local SEO Specialist", "Local SEO Manager"], "match": ["local seo"]},
-    {"label": "Link Building and Digital PR", "dept": "seo", "group": "SEO", "kw": "link building",
-     "titles": ["Link Building Specialist", "Digital PR Manager", "Outreach Specialist"],
-     "match": ["link building", "digital pr", "outreach specialist"]},
-    {"label": "SEO", "dept": "seo", "group": "SEO", "kw": "SEO",
-     "titles": ["SEO Manager", "SEO Specialist", "SEO Executive", "SEO Analyst", "Head of SEO"],
-     "match": ["seo", "search engine optim", "organic search"]},
-    {"label": "Google Ads", "dept": "digital_marketing", "group": "Paid & Performance", "kw": "Google Ads",
-     "titles": ["Google Ads Specialist", "Google Ads Manager", "AdWords Specialist"],
-     "match": ["google ads", "adwords"]},
-    {"label": "Paid Media / PPC", "dept": "digital_marketing", "group": "Paid & Performance", "kw": "PPC",
-     "titles": ["PPC Manager", "Paid Media Manager", "PPC Specialist", "Paid Search Manager"],
-     "match": ["ppc", "paid media", "paid search", "biddable"]},
-    {"label": "Social Media Marketing", "dept": "digital_marketing", "group": "Paid & Performance",
+    {"label": "SEO", "dept": "seo", "group": "Search & Performance", "kw": "SEO",
+     "titles": ["SEO Manager", "SEO Specialist", "SEO Executive", "SEO Analyst", "Head of SEO",
+                "Technical SEO Specialist", "Technical SEO Manager", "SEO Developer",
+                "Local SEO Specialist", "Link Building Specialist", "Digital PR Manager",
+                "Outreach Specialist"],
+     "match": ["technical seo", "local seo", "link building", "digital pr", "outreach specialist",
+               "seo", "search engine optim", "organic search", "search marketing"]},
+    {"label": "Paid Media & PPC", "dept": "digital_marketing", "group": "Search & Performance",
+     "kw": "PPC", "titles": ["PPC Manager", "Paid Media Manager", "Paid Search Manager",
+                             "Google Ads Specialist", "Google Ads Manager", "AdWords Specialist",
+                             "Performance Marketing Manager", "Growth Marketing Manager"],
+     "match": ["google ads", "adwords", "ppc", "paid media", "paid search", "biddable",
+               "performance marketing", "growth marketing", "sem manager", "media buyer"]},
+    {"label": "Social Media Marketing", "dept": "digital_marketing", "group": "Search & Performance",
      "kw": "social media", "titles": ["Social Media Manager", "Social Media Marketing Specialist",
-                                       "Paid Social Manager"], "match": ["social media", "paid social"]},
-    {"label": "Performance Marketing", "dept": "digital_marketing", "group": "Paid & Performance",
-     "kw": "performance marketing", "titles": ["Performance Marketing Manager", "Growth Marketing Manager"],
-     "match": ["performance marketing", "growth marketing"]},
-    {"label": "Email Marketing", "dept": "digital_marketing", "group": "Paid & Performance",
-     "kw": "email marketing", "titles": ["Email Marketing Manager", "Email Marketing Specialist",
-                                         "CRM Marketing Manager"],
-     "match": ["email marketing", "crm marketing", "lifecycle marketing"]},
-    {"label": "Marketing Automation", "dept": "digital_marketing", "group": "Paid & Performance",
-     "kw": "marketing automation", "titles": ["Marketing Automation Specialist",
-                                              "Marketing Automation Manager", "HubSpot Specialist"],
-     "match": ["marketing automation", "marketo", "hubspot", "pardot"]},
+                                       "Paid Social Manager", "Community Manager"],
+     "match": ["social media", "paid social", "community manager", "influencer marketing"]},
     {"label": "Digital Marketing", "dept": "digital_marketing", "group": "Marketing & Content",
      "kw": "digital marketing", "titles": ["Digital Marketing Manager", "Digital Marketing Specialist",
-                                           "Digital Marketing Executive"], "match": ["digital marketing"]},
-    {"label": "Conversion Rate Optimization", "dept": "digital_marketing", "group": "Marketing & Content",
-     "kw": "conversion rate optimization", "titles": ["CRO Specialist",
-                                                      "Conversion Rate Optimization Manager", "CRO Manager"],
-     "match": ["conversion rate", "cro specialist", "cro manager"]},
-    {"label": "Data Analytics and Reporting", "dept": "digital_marketing", "group": "Marketing & Content",
+                                           "Digital Marketing Executive", "Email Marketing Manager",
+                                           "Marketing Automation Specialist", "CRO Specialist",
+                                           "Ecommerce Manager", "Shopify Developer"],
+     "match": ["digital marketing", "email marketing", "crm marketing", "lifecycle marketing",
+               "marketing automation", "marketo", "hubspot", "pardot", "conversion rate",
+               "cro specialist", "cro manager", "ecommerce", "e-commerce", "shopify"]},
+    {"label": "Data & Analytics", "dept": "digital_marketing", "group": "Marketing & Content",
      "kw": "marketing analytics", "titles": ["Marketing Analyst", "Data Analyst", "Analytics Manager",
-                                             "Reporting Analyst"],
-     "match": ["analytics", "data analyst", "reporting analyst", "data studio", "looker"]},
-    {"label": "Content Writer", "dept": "marketing", "group": "Marketing & Content", "kw": "content writer",
-     "titles": ["Content Writer", "Content Specialist", "Content Marketing Manager"],
-     "match": ["content writer", "content marketing", "content specialist"]},
-    {"label": "Content Designer", "dept": "marketing", "group": "Marketing & Content",
-     "kw": "content designer", "titles": ["Content Designer", "Content Strategist"],
-     "match": ["content designer", "content strategist"]},
-    {"label": "Copywriting", "dept": "marketing", "group": "Marketing & Content", "kw": "copywriter",
-     "titles": ["Copywriter", "Senior Copywriter", "Copywriting Lead"], "match": ["copywriter", "copywriting"]},
-    {"label": "Marketing", "dept": "marketing", "group": "Marketing & Content", "kw": "marketing",
-     "titles": ["Marketing Manager", "Marketing Director", "Head of Marketing", "CMO", "Brand Manager"],
-     "match": ["marketing", "brand manager", "cmo", "communications"]},
-    {"label": "WordPress Development", "dept": "other", "group": "Creative & Web", "kw": "WordPress",
-     "titles": ["WordPress Developer", "WordPress Designer"], "match": ["wordpress"]},
+                                             "Reporting Analyst", "Web Analytics Manager"],
+     "match": ["marketing analytics", "web analytics", "data analyst", "reporting analyst",
+               "data studio", "looker", "ga4", "google analytics"]},
+    {"label": "Content & Copywriting", "dept": "marketing", "group": "Marketing & Content",
+     "kw": "content writer", "titles": ["Content Writer", "Content Marketing Manager",
+                                        "Content Specialist", "Content Designer", "Content Strategist",
+                                        "Copywriter", "Senior Copywriter"],
+     "match": ["content writer", "content marketing", "content specialist", "content designer",
+               "content strategist", "copywriter", "copywriting"]},
+    {"label": "Marketing & Branding", "dept": "marketing", "group": "Marketing & Content",
+     "kw": "marketing", "titles": ["Marketing Manager", "Marketing Director", "Head of Marketing",
+                                   "CMO", "Brand Manager"],
+     "match": ["marketing", "brand manager", "branding", "cmo", "communications", "marcom"]},
     {"label": "Web Development", "dept": "other", "group": "Creative & Web", "kw": "web developer",
-     "titles": ["Web Developer", "Frontend Developer", "Full Stack Developer"],
-     "match": ["web developer", "frontend", "front-end", "full stack", "web development"]},
-    {"label": "UI/UX Design", "dept": "other", "group": "Creative & Web", "kw": "UX designer",
-     "titles": ["UI Designer", "UX Designer", "UI/UX Designer", "Product Designer"],
-     "match": ["ui/ux", "ux design", "ui design", "product designer", "user experience"]},
-    {"label": "Graphic Design", "dept": "other", "group": "Creative & Web", "kw": "graphic designer",
-     "titles": ["Graphic Designer", "Visual Designer", "Senior Graphic Designer"],
-     "match": ["graphic design", "visual designer"]},
-    {"label": "Video Editing and Production", "dept": "other", "group": "Creative & Web", "kw": "video editor",
-     "titles": ["Video Editor", "Video Producer", "Motion Designer"],
-     "match": ["video editor", "video produc", "motion designer", "videographer"]},
-    {"label": "E-commerce", "dept": "other", "group": "Sales & Ops", "kw": "ecommerce",
-     "titles": ["Ecommerce Manager", "E-commerce Specialist", "Shopify Developer"],
-     "match": ["ecommerce", "e-commerce", "shopify"]},
-    {"label": "Account Management", "dept": "sales", "group": "Sales & Ops", "kw": "account manager",
-     "titles": ["Account Manager", "Client Services Manager", "Account Director"],
-     "match": ["account manager", "account director", "client services", "client success"]},
-    {"label": "Sales and Business Development", "dept": "sales", "group": "Sales & Ops",
+     "titles": ["Web Developer", "Frontend Developer", "Full Stack Developer", "WordPress Developer",
+                "WordPress Designer"],
+     "match": ["wordpress", "web developer", "frontend", "front-end", "full stack", "web development"]},
+    {"label": "Design (UI/UX & Graphic)", "dept": "other", "group": "Creative & Web", "kw": "UX designer",
+     "titles": ["UI Designer", "UX Designer", "UI/UX Designer", "Product Designer", "Graphic Designer",
+                "Visual Designer"],
+     "match": ["ui/ux", "ux design", "ui design", "product designer", "user experience",
+               "graphic design", "visual designer"]},
+    {"label": "Video & Creative Production", "dept": "other", "group": "Creative & Web",
+     "kw": "video editor", "titles": ["Video Editor", "Video Producer", "Motion Designer",
+                                      "Videographer"],
+     "match": ["video editor", "video produc", "motion designer", "videographer", "animator"]},
+    {"label": "Sales & Account Management", "dept": "sales", "group": "Client & People",
      "kw": "business development", "titles": ["Business Development Manager", "Sales Manager",
-                                             "Account Executive", "Sales Director"],
+                                             "Account Executive", "Sales Director", "Account Manager",
+                                             "Client Services Manager", "Account Director",
+                                             "Project Manager", "Program Manager"],
      "match": ["business development", "sales manager", "account executive", "sales director",
-               "bdr", "sdr", "sales executive"]},
-    {"label": "Project Management", "dept": "other", "group": "Sales & Ops", "kw": "project manager",
-     "titles": ["Project Manager", "Digital Project Manager", "Program Manager"],
-     "match": ["project manager", "program manager", "project management", "scrum master"]},
-    {"label": "Talent Acquisition", "dept": "other", "group": "People", "kw": "talent acquisition",
+               "bdr", "sdr", "sales executive", "account manager", "account director",
+               "client services", "client success", "project manager", "program manager",
+               "project management", "scrum master"]},
+    {"label": "HR & Recruiting", "dept": "other", "group": "Client & People", "kw": "talent acquisition",
      "titles": ["Talent Acquisition Specialist", "Recruiter", "Recruitment Manager",
-                "Talent Acquisition Manager"], "match": ["talent acquisition", "recruiter", "recruitment"]},
-    {"label": "HR", "dept": "other", "group": "People", "kw": "human resources",
-     "titles": ["HR Manager", "Human Resources Manager", "HR Business Partner"],
-     "match": ["human resources", "hr manager", "hr business partner", "people operations"]},
+                "Talent Acquisition Manager", "HR Manager", "Human Resources Manager", "HR Business Partner"],
+     "match": ["talent acquisition", "recruiter", "recruitment", "human resources", "hr manager",
+               "hr business partner", "people operations"]},
 ]
 CATEGORY_DEPT = {c["label"]: c["dept"] for c in CATEGORIES}
 CATEGORY_LABELS = [c["label"] for c in CATEGORIES]
+CATEGORY_SET = set(CATEGORY_LABELS)
+
+# Map every legacy (28-taxonomy) label → its consolidated 12-taxonomy label. Used to migrate
+# existing candidate/company rows in one bulk UPDATE and to normalise any stored old label.
+CATEGORY_MERGE_MAP = {
+    "Technical SEO": "SEO", "Local SEO": "SEO", "Link Building and Digital PR": "SEO", "SEO": "SEO",
+    "Google Ads": "Paid Media & PPC", "Paid Media / PPC": "Paid Media & PPC",
+    "Performance Marketing": "Paid Media & PPC",
+    "Social Media Marketing": "Social Media Marketing",
+    "Email Marketing": "Digital Marketing", "Marketing Automation": "Digital Marketing",
+    "Digital Marketing": "Digital Marketing", "Conversion Rate Optimization": "Digital Marketing",
+    "E-commerce": "Digital Marketing",
+    "Data Analytics and Reporting": "Data & Analytics",
+    "Content Writer": "Content & Copywriting", "Content Designer": "Content & Copywriting",
+    "Copywriting": "Content & Copywriting",
+    "Marketing": "Marketing & Branding",
+    "WordPress Development": "Web Development", "Web Development": "Web Development",
+    "UI/UX Design": "Design (UI/UX & Graphic)", "Graphic Design": "Design (UI/UX & Graphic)",
+    "Video Editing and Production": "Video & Creative Production",
+    "Account Management": "Sales & Account Management",
+    "Sales and Business Development": "Sales & Account Management",
+    "Project Management": "Sales & Account Management",
+    "Talent Acquisition": "HR & Recruiting", "HR": "HR & Recruiting",
+}
+
+
+def canonical_category(cat: Optional[str]) -> Optional[str]:
+    """Normalise any category string to one of the 12 (maps legacy labels; passes valid ones)."""
+    if not cat:
+        return None
+    if cat in CATEGORY_SET:
+        return cat
+    return CATEGORY_MERGE_MAP.get(cat)
 # UI groups (preserve definition order)
 GROUPS: Dict[str, List[str]] = {}
 for _c in CATEGORIES:
@@ -905,12 +921,10 @@ GROUP_ORDER = list(GROUPS.keys())
 CATEGORY_GROUP = {label: g for g, labels in GROUPS.items() for label in labels}
 # human "industry" label per group — used as a FREE fallback when Apollo has no industry
 GROUP_INDUSTRY = {
-    "SEO": "SEO / Search Marketing",
-    "Paid & Performance": "Performance / Paid Media",
+    "Search & Performance": "Search & Performance Marketing",
     "Marketing & Content": "Digital Marketing & Content",
     "Creative & Web": "Creative & Web Development",
-    "Sales & Ops": "Sales & Business Development",
-    "People": "HR & Recruiting",
+    "Client & People": "Agency Client Services & HR",
 }
 
 
@@ -986,28 +1000,51 @@ _HARD_BLOCK = [
     # public sector / institutions
     "government", "ministry", "municipal", "council", "public sector", "defence",
     "defense", "police", "university", "college", "institute of technology",
-    "school district",
+    # education / schools (the user explicitly does NOT want schools, e.g. Delhi Public School)
+    "school district", "public school", "high school", "senior secondary", "sr. sec",
+    "vidyalaya", "kendriya", "navodaya", "montessori", "kindergarten", "playschool",
+    "play school", "pre school", "preschool", "grammar school", "convent", "gurukul",
+    "edutech", "ed-tech", "coaching centre", "coaching center", "tuition",
     # healthcare
     "hospital", "clinic", "healthcare", "pharmaceutic", "pharma ", "medical center",
     "diagnostics",
-    # well-known mega-corporations (200k+ / not agency talent pools)
+    # textiles / garments / apparel manufacturing (explicitly unwanted)
+    "textile", "garment", "apparel", "spinning mill", "knitwear", "readymade",
+    "hosiery", "yarn", "weaving",
+    # well-known mega-corporations / consumer brands (not agency talent pools)
     "amazon", "tech mahindra", "infosys", "wipro", "tata consultancy", "tcs ",
     "hcl tech", "hcltech", "cognizant", "capgemini", "accenture", "genpact",
     "deloitte", "ernst & young", "kpmg", "pricewaterhouse", "pwc ", "ibm ",
-    "reliance", "adani", "flipkart", "walmart", "jpmorgan", "wells fargo",
-    "concentrix", "teleperformance", "foxconn",
+    "reliance", "adani", "flipkart", "myntra", "walmart", "jpmorgan", "wells fargo",
+    "concentrix", "teleperformance", "foxconn", "swiggy", "zomato", "paytm", "byju",
+    "unacademy", "vedantu", "jio", "airtel", "vodafone", "godrej", "hindustan unilever",
+    "nestle", "britannia", "dabur", "patanjali", "asian paints", "maruti", "hyundai",
+    "samsung", "lg electronics", "panasonic", "itc limited", "bajaj auto",
     "nocree",
 ]
 _SOFT_BLOCK = [
     "airlines", "airways", "aviation", "railways", "petroleum", "oil & gas",
     "oil and gas", "power plant", "electricity board", "steel", "cement", "mining",
-    "automobile", "manufacturing plant", "freight", "logistics & supply",
+    "automobile", "automotive", "dealership", "manufacturing", "manufacturing plant",
+    "industries", "industrial", "factory", "freight", "logistics & supply",
     "real estate", "construction", "hospitality", "restaurant", "hotel",
+    # consumer goods / retail (explicitly unwanted unless clearly an agency)
+    "fmcg", "consumer goods", "supermarket", "hypermarket", "grocery", "retail chain",
+    "jeweller", "jewellery", "jewelry", "fertilizer", "agro", "dairy", "sugar mill",
+    "paper mill", "chemicals", "plastics", "packaging",
 ]
 _ALLOW_TOKENS = ["seo", "digital marketing", "digital agency", "marketing", "advertis",
                  "agency", "media", "creative", "design", "software", "web develop",
                  "growth", "performance marketing", "analytics", "studio", "interactive",
-                 "e-commerce", "ecommerce", "tech labs", "martech"]
+                 "e-commerce", "ecommerce", "tech labs", "martech", "branding"]
+
+
+def is_hard_blocked(name: str) -> bool:
+    """True only for names that are NEVER relevant (no allow-override) — used for the immediate,
+    conservative bulk cleanup so the obvious offenders (schools, textiles, mega-corps) are dropped
+    while subtler cases are judged with context by the OpenAI-aware crawler."""
+    n = (name or "").lower().strip()
+    return bool(n) and any(b in n for b in _HARD_BLOCK)
 
 
 def is_relevant_company(name: str) -> bool:
@@ -1020,6 +1057,56 @@ def is_relevant_company(name: str) -> bool:
     if any(a in n for a in _ALLOW_TOKENS):
         return True
     return not any(b in n for b in _SOFT_BLOCK)
+
+
+def openai_classify_company(name: str, description: str = "", industry: str = "",
+                            dominant_cats: Optional[List[str]] = None) -> dict:
+    """Use OpenAI to (a) judge whether a company is RELEVANT to an SEO/digital-marketing talent
+    search (we source from agencies, marketing/creative/web/software firms — NOT schools, textiles,
+    garments, banks, hospitals, manufacturers, retail/FMCG, mega-corps) and (b) place it in ONE of
+    the 12 categories. Grounded in the provided facts; never invents. Falls back to the keyword
+    relevance filter + dominant candidate category when OpenAI is absent.
+    Returns {relevant: bool, category: <one of CATEGORY_LABELS or None>, source}."""
+    dominant_cats = [canonical_category(c) for c in (dominant_cats or [])]
+    dominant_cats = [c for c in dominant_cats if c]
+    kw_relevant = is_relevant_company(name)
+    kw_cat = (canonical_category(classify_category(name, " ".join(filter(None, [description, industry]))))
+              or (dominant_cats[0] if dominant_cats else None))
+    if not openai_available():
+        return {"relevant": kw_relevant, "category": kw_cat, "source": "keyword"}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        sysmsg = (
+            "You categorise companies for a recruitment agency that sources SEO / digital-marketing / "
+            "creative / web / software talent. Decide if the company is a RELEVANT employer to source "
+            "such talent from. RELEVANT = digital/marketing/advertising/SEO/creative/design/web/"
+            "software/media/PR/ecommerce-services agencies and tech companies. NOT RELEVANT = schools/"
+            "colleges/coaching, textiles/garments/apparel, manufacturing/industrial, banks/finance/"
+            "insurance, hospitals/pharma, retail/FMCG/consumer brands, real estate, hospitality, "
+            "logistics, government, and huge non-agency corporations. Then assign EXACTLY ONE category "
+            "from this fixed list (use the closest fit): " + "; ".join(CATEGORY_LABELS) + ". "
+            "Use ONLY the provided facts; do not invent. Return STRICT JSON: "
+            '{"relevant":true|false,"category":"<one label from the list, or null if not relevant>",'
+            '"reason":"<=12 words"}.')
+        facts = {"name": name, "description": (description or "")[:600], "industry": industry,
+                 "employee_disciplines": dominant_cats}
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0.0, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": sysmsg},
+                      {"role": "user", "content": json.dumps(facts, default=str)}], timeout=30)
+        out = json.loads(resp.choices[0].message.content)
+        rel = bool(out.get("relevant"))
+        cat = canonical_category(out.get("category")) if rel else None
+        if rel and not cat:
+            cat = kw_cat  # model said relevant but gave an off-list category → keyword fallback
+        # Hard safety net: never let OpenAI keep a clearly-blocked employer.
+        if is_hard_blocked(name):
+            rel = False; cat = None
+        return {"relevant": rel, "category": cat, "source": "openai"}
+    except Exception as e:
+        log.warning("openai_classify_company failed (%s) — keyword fallback", e)
+        return {"relevant": kw_relevant, "category": kw_cat, "source": "keyword"}
 
 
 # ── Free company-domain resolution via Clearbit autocomplete (no key, no Apollo
@@ -2168,7 +2255,7 @@ def enrich_company_web(limit: int = 20, logf=None) -> int:
     return n
 
 
-def cleanup_irrelevant_companies(limit: int = 5000) -> int:
+def cleanup_irrelevant_companies(limit: int = 100000) -> int:
     """Delete existing companies (and their candidates) that fail the relevance filter
     (banks, govt, healthcare, etc.). One-time/periodic housekeeping."""
     rows = db.CompanyRepo.all_id_name(limit)
@@ -2176,6 +2263,24 @@ def cleanup_irrelevant_companies(limit: int = 5000) -> int:
     if drop:
         db.CompanyRepo.delete_with_candidates(drop)
     return len(drop)
+
+
+def cleanup_hard_blocked_companies(limit: int = 100000) -> int:
+    """Delete companies whose NAME is clearly never-relevant (schools, textiles/garments, banks,
+    mega-corps, …) — the conservative immediate sweep (no allow-override, no OpenAI). The nuanced
+    cases are judged with context by the re-process crawler. Returns count removed."""
+    rows = db.CompanyRepo.all_id_name(limit)
+    drop = [r["id"] for r in rows if is_hard_blocked(r.get("name") or "")]
+    if drop:
+        db.CompanyRepo.delete_with_candidates(drop)
+    return len(drop)
+
+
+def migrate_categories_to_12() -> dict:
+    """One-shot: consolidate every stored candidate + company category to the 12-taxonomy."""
+    nc = db.CandidateRepo.remap_categories(CATEGORY_MERGE_MAP)
+    nk = db.CompanyRepo.remap_categories(CATEGORY_MERGE_MAP)
+    return {"candidates": nc, "companies": nk}
 
 
 def enrich_candidate(candidate_id: int, reveal_email: bool = True,
@@ -3063,7 +3168,7 @@ def rescore_candidate(candidate_id: int, target_families: Optional[List[str]] = 
             "functions": [], "departments": row.get("departments_json") or [], "_org": org,
             "employment_history": row.get("employment_history_json") or [],
             "company_domain": row.get("company_domain"), "linkedin_url": row.get("linkedin_url")}
-    category = classify_category(title, headline) or row.get("category")
+    category = classify_category(title, headline) or canonical_category(row.get("category"))
     dept = CATEGORY_DEPT.get(category) if category else None
     if not dept:
         dept = classify_department(title, headline, row.get("departments_json") or [], [])
@@ -3094,16 +3199,28 @@ def rescore_candidate(candidate_id: int, target_families: Optional[List[str]] = 
 
 
 def recompute_company_category(company_id: int) -> Optional[str]:
-    """Set the authoritative per-company category: score-weighted dominant candidate category,
-    confirmed/overridden by the company's homepage text when it clearly indicates one. FREE."""
-    cat = db.CandidateRepo.weighted_dominant_category(company_id)
-    source = "candidates"
+    """Set the authoritative per-company category (one of the 12). Uses OpenAI when available —
+    grounded in the company name, homepage text, industry and the disciplines of its own employees
+    — and falls back to the score-weighted dominant candidate category + homepage keywords. FREE-ish
+    (one cheap gpt-4o-mini call per company on re-process)."""
     co = db.CompanyRepo.get(company_id)
+    dominant = canonical_category(db.CandidateRepo.weighted_dominant_category(company_id))
+    cat, source = dominant, "candidates"
     if co:
-        web_text = " ".join(filter(None, [co.get("description"), co.get("industry"), co.get("name")]))
-        web_cat = classify_category("", web_text) if web_text else None
-        if web_cat:
-            cat, source = web_cat, "web"
+        try:
+            top_cats = db.CandidateRepo.top_categories_for_company(company_id, 4)
+        except Exception:
+            top_cats = []
+        res = openai_classify_company(co.get("name") or "", co.get("description") or "",
+                                      co.get("industry") or "", top_cats)
+        if res.get("category"):
+            cat, source = res["category"], res.get("source") or "openai"
+        elif not cat:
+            # keyword homepage fallback
+            web_text = " ".join(filter(None, [co.get("description"), co.get("industry"), co.get("name")]))
+            cat = canonical_category(classify_category("", web_text)) if web_text else None
+            source = "web"
+    cat = canonical_category(cat)
     if cat:
         db.CompanyRepo.set_category(company_id, cat, source)
     return cat
@@ -3114,8 +3231,24 @@ def roster_reprocess_batch(limit: int = 2, logf=None) -> dict:
     each due company refresh free firmographics (domain + homepage 'About'), re-score &
     re-classify every attached candidate, then set the authoritative company category."""
     companies = db.CompanyRepo.reprocess_pending(limit)
-    n_co = n_cand = n_web = n_sum = 0
+    n_co = n_cand = n_web = n_sum = n_drop = 0
     for co in companies:
+        # 0) Relevance prune. Hard-blocked names go immediately; otherwise let OpenAI judge with
+        #    context (description + employee disciplines) and delete the irrelevant ones + their
+        #    candidates. This removes schools/textiles/garments/retail/mega-corps from the DB.
+        try:
+            if is_hard_blocked(co.get("name") or ""):
+                db.CompanyRepo.delete_with_candidates([co["id"]]); n_drop += 1; continue
+            try:
+                top0 = db.CandidateRepo.top_categories_for_company(co["id"], 4)
+            except Exception:
+                top0 = []
+            verdict = openai_classify_company(co.get("name") or "", co.get("description") or "",
+                                              co.get("industry") or "", top0)
+            if not verdict.get("relevant"):
+                db.CompanyRepo.delete_with_candidates([co["id"]]); n_drop += 1; continue
+        except Exception as e:
+            log.warning("reprocess relevance %s: %s", co.get("id"), e)
         try:
             # 1) Resolve the website — FREE from candidates first (fixes "pending"), then Clearbit.
             if not co.get("root_domain"):
@@ -3158,9 +3291,10 @@ def roster_reprocess_batch(limit: int = 2, logf=None) -> dict:
         db.CompanyRepo.mark_reprocessed(co["id"])
         n_co += 1
     if logf and companies:
-        logf(f"Re-process: {n_cand} candidates upgraded · {n_web} websites · {n_sum} summaries "
-             f"across {n_co} companies")
-    return {"companies": n_co, "candidates": n_cand, "websites": n_web, "summaries": n_sum}
+        logf(f"Re-process: {n_cand} candidates upgraded · {n_web} websites · {n_sum} summaries · "
+             f"{n_drop} irrelevant removed across {n_co} companies")
+    return {"companies": n_co, "candidates": n_cand, "websites": n_web, "summaries": n_sum,
+            "removed": n_drop}
 
 
 def roster_reprocess_enabled() -> bool:
