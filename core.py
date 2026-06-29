@@ -234,13 +234,20 @@ class ApolloClient:
         if not co_phone and isinstance(pp, dict):
             co_phone = safe_str(pp.get("number") or pp.get("sanitized_number"))
         phone_requested = ("reveal_phone_number" in payload)
+        # Capture the async request_id robustly (Apollo's shape varies) so we can POLL
+        # GET /webhook_result/{request_id} later — reliable even if the inbound webhook never reaches us.
+        req_id = ""
+        if phone_requested:
+            for cand_id in (data.get("request_id"), data.get("id"),
+                            (data.get("request") or {}).get("id") if isinstance(data.get("request"), dict) else None,
+                            (data.get("enrichment") or {}).get("request_id") if isinstance(data.get("enrichment"), dict) else None):
+                if cand_id:
+                    req_id = safe_str(cand_id); break
         return {
             "_ok": True, "_http_status": 200, "_retried": retried,
             "_phone_reveal_error": phone_reveal_error,
             "_phone_requested": phone_requested or bool(webhook_url and not phone_reveal_error),
-            # Apollo returns a request_id for async phone reveals — capture it so we can POLL
-            # GET /webhook_result/{request_id} later (reliable even if the webhook never reaches us).
-            "_phone_request_id": (safe_str(data.get("request_id")) if phone_requested else ""),
+            "_phone_request_id": req_id,
             "email": _best_email(person, first_name, last_name),
             "phone": _best_phone(person, co_phone),
             "employment_history": person.get("employment_history") or [],
@@ -320,6 +327,128 @@ def is_personal_email(email: str) -> bool:
     if not email or "@" not in email:
         return False
     return email.lower().split("@")[-1].strip() in PERSONAL_EMAIL_DOMAINS
+
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_PHONE_RE = re.compile(r"(?:(?:\+|00)\d{1,3}[\s.\-]?)?(?:\(?\d{2,4}\)?[\s.\-]?){2,5}\d{2,4}")
+
+
+def _valid_email(s: str) -> Optional[str]:
+    s = (s or "").strip().strip(".,;:<>()[]\"' ")
+    if not s or "@" not in s:
+        return None
+    m = _EMAIL_RE.search(s)
+    return m.group(0).lower() if m else None
+
+
+def _valid_phone(s: str) -> Optional[str]:
+    """Accept a phone only if it has 8–15 digits (drops years, ZIPs, ids)."""
+    if not s:
+        return None
+    m = _PHONE_RE.search(str(s))
+    if not m:
+        return None
+    cand = m.group(0).strip()
+    digits = re.sub(r"\D", "", cand)
+    if not (8 <= len(digits) <= 15):
+        return None
+    return cand
+
+
+def _harvest_contacts_from_obj(obj, emails: set, phones: set, depth: int = 0, phone_ctx: bool = False) -> None:
+    """Walk a CoreSignal record collecting contacts. Emails: scanned from EVERY string (the @
+    pattern is unambiguous). Phones: only under a phone-ish key (to avoid grabbing random numbers
+    like years/ids) — the key context propagates into nested lists/dicts."""
+    if depth > 5 or obj is None:
+        return
+    if isinstance(obj, str):
+        e = _valid_email(obj)
+        if e:
+            emails.add(e)
+        if phone_ctx:
+            p = _valid_phone(obj)
+            if p:
+                phones.add(p)
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            kl = str(k).lower()
+            child_phone = phone_ctx or ("phone" in kl or "mobile" in kl or "contact_number" in kl)
+            _harvest_contacts_from_obj(v, emails, phones, depth + 1, child_phone)
+    elif isinstance(obj, list):
+        for it in obj[:80]:
+            _harvest_contacts_from_obj(it, emails, phones, depth + 1, phone_ctx)
+
+
+def extract_linkedin_contacts(record: dict, candidate: Optional[dict] = None) -> dict:
+    """Pull any phone/email present on a candidate's LinkedIn profile from the CoreSignal record.
+    Two free passes: (1) structured contact-ish fields anywhere in the record; (2) OpenAI over the
+    free-text summary/headline (people often put a contact in their 'About'). Validated, deduped.
+    Returns {email, phone, source}. Never raises."""
+    emails: set = set()
+    phones: set = set()
+    try:
+        _harvest_contacts_from_obj(record, emails, phones)
+    except Exception:
+        pass
+    # OpenAI pass over the free text only (cheap, grounded, no invention).
+    if openai_available():
+        text = " \n".join(filter(None, [
+            (record or {}).get("summary"), (record or {}).get("headline"),
+            (record or {}).get("about"), (record or {}).get("contact_info"),
+            (record or {}).get("location_full")]))[:4000]
+        if text.strip():
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+                resp = client.chat.completions.create(
+                    model="gpt-4o-mini", temperature=0.0, response_format={"type": "json_object"},
+                    messages=[{"role": "system", "content":
+                               "Extract a contact EMAIL and PHONE only if they literally appear in the "
+                               "text. Never guess or fabricate. Return STRICT JSON "
+                               '{"email":"<addr or null>","phone":"<number or null>"}.'},
+                              {"role": "user", "content": text}], timeout=20)
+                out = json.loads(resp.choices[0].message.content)
+                e = _valid_email(out.get("email") or "")
+                p = _valid_phone(out.get("phone") or "")
+                if e:
+                    emails.add(e)
+                if p:
+                    phones.add(p)
+            except Exception as ex:
+                log.warning("linkedin contact OpenAI extract failed: %s", ex)
+    # Prefer a non-consumer/work-looking email if several; else any.
+    email = None
+    if emails:
+        official = [e for e in emails if not is_personal_email(e)]
+        email = sorted(official or list(emails))[0]
+    phone = sorted(phones, key=len, reverse=True)[0] if phones else None
+    return {"email": email, "phone": phone, "source": "linkedin"}
+
+
+def apply_linkedin_contacts(candidate_id: int, record: dict, candidate: Optional[dict] = None) -> dict:
+    """Extract LinkedIn contacts and persist them (precedence over Apollo; never overwritten)."""
+    got = extract_linkedin_contacts(record, candidate)
+    try:
+        db.CandidateRepo.set_linkedin_contacts(candidate_id, got.get("email"), got.get("phone"))
+    except Exception as e:
+        log.warning("set_linkedin_contacts failed (%s): %s", candidate_id, e)
+    return got
+
+
+def effective_contacts(c: dict) -> dict:
+    """LinkedIn-sourced contact takes precedence over Apollo for BOTH email and phone, regardless
+    of Apollo's enrichment state. Returns the values to display + their source."""
+    li_e = (c.get("linkedin_email") or "").strip()
+    li_p = (c.get("linkedin_phone") or "").strip()
+    ap_e = (c.get("email") or "").strip()
+    ap_p = (c.get("phone") or "").strip()
+    return {
+        "email_effective": li_e or ap_e or None,
+        "phone_effective": li_p or ap_p or None,
+        "email_source": "linkedin" if li_e else ("apollo" if ap_e else None),
+        "phone_source": "linkedin" if li_p else ("apollo" if ap_p else None),
+    }
 
 
 def _email_contains_person_name(email_addr: str, first_name: str = "", last_name: str = "") -> bool:
@@ -2190,6 +2319,13 @@ def roster_sync_batch(limit: int = 4, logf=None) -> Tuple[int, int]:
     for co in companies:
         try:
             total += sync_company_roster(co, logf=logf)
+            # Converge both crawlers on ONE upgrade path: re-queue each rostered company so the
+            # quality re-process pipeline (categorise, website, summary, rescore + LinkedIn
+            # contacts) runs over its people too — no record left on an older process.
+            try:
+                db.CompanyRepo.queue_reprocess(co["id"])
+            except Exception:
+                pass
         except Exception as e:
             log.warning("roster sync failed for %s: %s", co.get("name"), e)
             try:
@@ -2688,6 +2824,15 @@ def _cs_store_fields(rec: dict) -> dict:
         "recent_closed": rec.get("experience_recently_closed"),
         "updated_at": rec.get("updated_at") or rec.get("checked_at"),
         "profile_url": _cs_profile_url(rec),
+        # Retain any contact fields the profile exposes so the LinkedIn-first contact route can
+        # (re)derive them later from the stored record, not just at enrich time.
+        "professional_emails": rec.get("professional_emails"),
+        "emails": rec.get("emails"),
+        "primary_professional_email": rec.get("primary_professional_email"),
+        "recommended_personal_email": rec.get("recommended_personal_email"),
+        "phone": rec.get("phone") or rec.get("phone_number"),
+        "phones": rec.get("phones") or rec.get("phone_numbers"),
+        "contact_info": rec.get("contact_info"),
     }
 
 
@@ -2870,6 +3015,12 @@ def enrich_coresignal(candidate_id: int, employee_id=None) -> dict:
         open_to_work=assess.get("open_to_work"), intent_score=intent,
         scores_json=scores_json, overall=overall,
         linkedin_url=(resolved_url if _looks_like_linkedin(resolved_url) else None))
+    # PRIMARY contact route: pull any phone/email on the LinkedIn profile (free) and persist it —
+    # it takes precedence over Apollo and is never overwritten on later runs.
+    try:
+        apply_linkedin_contacts(candidate_id, record, row)
+    except Exception as e:
+        log.warning("apply_linkedin_contacts failed (%s): %s", candidate_id, e)
     return {"ok": True, "candidate": db.CandidateRepo.get(candidate_id), "assessment": assess,
             "match": res.get("match"), "coresignal": cs_store, "credits_remaining": res.get("credits"),
             "linkedin_via_apollo": bool(res.get("_via_apollo"))}
@@ -3100,6 +3251,69 @@ def reconcile_pending_phones(limit: int = 25) -> int:
     return filled
 
 
+def _bg_webhook_url() -> str:
+    """Build the Apollo phone webhook URL for BACKGROUND jobs (no request context). Uses
+    PUBLIC_BASE_URL (must be the public https host) + the webhook token. Empty if not configured."""
+    base = (_env("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    tok = apollo_webhook_token()
+    if not base or not tok:
+        return ""
+    if "://" not in base:
+        base = "https://" + base
+    return base + "/api/apollo-phone-webhook?token=" + tok
+
+
+def proactive_phone_reveal_batch(limit: int = 8) -> int:
+    """Proactively request mobiles in the BACKGROUND for candidates Apollo says have one, so phones
+    fill in for everyone over time rather than only on a manual click. The reconciler then polls the
+    result. Cost-controlled: OFF unless HR_PROACTIVE_PHONE_ENABLED=1, strictly bounded by the daily
+    phone cap. Returns reveals requested. Needs PUBLIC_BASE_URL so Apollo gets a valid https webhook."""
+    if _env("HR_PROACTIVE_PHONE_ENABLED", "0") != "1":
+        return 0
+    apollo = get_apollo()
+    if not getattr(apollo, "api_key", ""):
+        return 0
+    webhook = _bg_webhook_url()
+    if not webhook:
+        log.warning("proactive phone: set PUBLIC_BASE_URL (https) to enable background reveals")
+        return 0
+    try:
+        counts = db.RevealCounterRepo.today()
+        cap = _env_int("ENRICH_MAX_REVEALS_PER_DAY_PHONE", 60)
+        remaining = cap - int(counts.get("phone_reveals", 0))
+    except Exception:
+        remaining = _env_int("ENRICH_MAX_REVEALS_PER_DAY_PHONE", 60)
+    if remaining <= 0:
+        return 0
+    rows = db.CandidateRepo.phone_reveal_candidates(min(limit, remaining))
+    requested = 0
+    for r in rows:
+        try:
+            res = apollo.enrich_person(
+                apollo_id=r.get("apollo_person_id") or "", first_name=r.get("first_name") or "",
+                last_name=r.get("last_name") or "", domain=r.get("company_domain") or "",
+                linkedin_url=r.get("linkedin_url") or "", reveal_email=False, reveal_phone=True,
+                webhook_url=webhook)
+        except Exception as e:
+            log.warning("proactive phone reveal failed (%s): %s", r.get("id"), e)
+            continue
+        if res.get("phone"):
+            db.CandidateRepo.set_phone(r["id"], res["phone"])
+        elif res.get("_phone_request_id"):
+            db.CandidateRepo.set_phone_request(r["id"], res["_phone_request_id"])
+        else:
+            # mark pending so we don't immediately re-pick it; the inbound webhook may still deliver
+            db.CandidateRepo.set_phone_request(r["id"], "")
+        try:
+            db.RevealCounterRepo.incr(email=0, phone=1)  # count against the daily cap (cost guard)
+        except Exception:
+            pass
+        requested += 1
+    if requested:
+        log.info("proactive phone: requested %d mobile reveal(s)", requested)
+    return requested
+
+
 def coresignal_status() -> dict:
     cs = get_coresignal()
     return {"configured": cs.configured(), "dataset": cs.dataset,
@@ -3183,6 +3397,14 @@ def rescore_candidate(candidate_id: int, target_families: Optional[List[str]] = 
         intent = int(row.get("job_change_intent_score") or intent)
         intent_source = row.get("intent_source") or intent_source
         intent_signals = (row.get("scores_json") or {}).get("intent_signals") or intent_signals
+        # Lead-upgrade crawler applies the LinkedIn-first contact route to every enriched lead
+        # (free — re-derives from already-stored CoreSignal data; never overwrites once found).
+        if not row.get("linkedin_contact_checked"):
+            rec = (row.get("coresignal_json") or {}).get("raw") or (row.get("coresignal_json") or {})
+            try:
+                apply_linkedin_contacts(candidate_id, rec, row)
+            except Exception as e:
+                log.warning("rescore linkedin contacts (%s): %s", candidate_id, e)
     freshness = score_freshness(row)
     ai_meta = row.get("ai_meta_json") or heuristic_classify(base)
     pack = {"role_fit": role_fit, "intent": intent, "technical": technical,
@@ -3395,6 +3617,13 @@ def scheduler_loop(stop_event: threading.Event, trigger_scheduled_run) -> None:
                         log.info("phone reconciler: filled %d mobile number(s)", got)
                 except Exception as e:
                     log.warning("phone reconcile error: %s", e)
+
+            # Proactively request mobiles in the background (OFF unless HR_PROACTIVE_PHONE_ENABLED=1;
+            # strictly bounded by the daily phone cap) so phones fill for everyone, not just on click.
+            try:
+                proactive_phone_reveal_batch(_env_int("PHONE_PROACTIVE_PER_TICK", 8))
+            except Exception as e:
+                log.warning("proactive phone error: %s", e)
 
             # Progressively resolve company websites (free Clearbit), paced every tick.
             try:

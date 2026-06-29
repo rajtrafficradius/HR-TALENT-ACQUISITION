@@ -354,8 +354,42 @@ def api_people():
         "min_overall", "min_intent", "min_company_score", "open_to_shift", "freshness", "q", "sort")
         if request.args.get(k) not in (None, "")}
     rows, total = db.CandidateRepo.list_page(filters, page, page_size)
+    for row in rows:  # LinkedIn-first effective contacts for the list (Avail icons + source)
+        row.update(core.effective_contacts(row))
     return jsonify({"rows": rows, "total": total, "page": page, "page_size": page_size,
                     "total_pages": max(1, -(-total // page_size))})
+
+
+@app.get("/api/people/export.csv")
+@require_auth
+def api_people_export():
+    """Export the CURRENT filtered candidate list as CSV with LinkedIn-first effective contacts —
+    the recruiter's working shortlist. Capped to keep it snappy."""
+    import csv, io
+    if (r := _require_db()):
+        return r
+    filters = {k: request.args.get(k) for k in (
+        "department", "category", "country", "seniority", "company_id", "enrichment_status",
+        "min_overall", "min_intent", "min_company_score", "open_to_shift", "freshness", "q", "sort")
+        if request.args.get(k) not in (None, "")}
+    limit = min(int(request.args.get("limit", 5000) or 5000), 10000)
+    rows, _ = db.CandidateRepo.list_page(filters, 1, limit, max_size=limit)
+    cols = [("full_name", "Name"), ("title", "Title"), ("company_name", "Company"),
+            ("company_domain", "Company Website"), ("category", "Category"), ("seniority", "Seniority"),
+            ("location_country", "Country"), ("job_change_intent_score", "Intent"),
+            ("overall_candidate_score", "Overall"), ("open_to_shift", "Open to Shift"),
+            ("email_effective", "Email"), ("email_source", "Email Source"),
+            ("phone_effective", "Phone"), ("phone_source", "Phone Source"),
+            ("linkedin_url", "LinkedIn")]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([h for _, h in cols])
+    for row in rows:
+        row.update(core.effective_contacts(row))
+        w.writerow([row.get(k, "") if row.get(k) is not None else "" for k, _ in cols])
+    from flask import Response
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=candidates.csv"})
 
 
 @app.get("/api/people/<int:cid>")
@@ -423,6 +457,9 @@ def api_person(cid):
         except Exception:
             ai_paragraph = None
 
+    # LinkedIn-sourced contacts take precedence over Apollo (regardless of Apollo's state).
+    cand.update(core.effective_contacts(cand))
+
     return jsonify({"candidate": cand, "company": company, "past_companies": past_companies,
                     "ai_paragraph": ai_paragraph, "ai_paragraph_source": ai_paragraph_source,
                     "enrichment_log": db.EnrichmentLogRepo.for_candidate(cid)})
@@ -438,19 +475,25 @@ def api_person_phone(cid):
     cand = db.CandidateRepo.get(cid)
     if not cand:
         return jsonify({"error": "not_found"}), 404
-    # If a reveal is still pending, ACTIVELY pull the result from Apollo now (drives delivery from
-    # this poll — no dependency on the scheduler or Apollo's inbound webhook reaching us).
+    # A LinkedIn-sourced mobile wins immediately (no Apollo dependency at all).
+    li_phone = (cand.get("linkedin_phone") or "").strip()
+    if li_phone:
+        return jsonify({"phone": li_phone, "has_phone": True, "pending": False,
+                        "resolved": True, "source": "linkedin"})
+    # If an Apollo reveal is still pending, ACTIVELY pull the result now (drives delivery from this
+    # poll — no dependency on the scheduler or Apollo's inbound webhook reaching us).
     if cand.get("phone_pending") and not cand.get("phone"):
         try:
             r = core.poll_one_phone(cid)
             return jsonify({"phone": r.get("phone"),
                             "has_phone": bool(cand.get("has_phone") or r.get("phone")),
                             "pending": bool(r.get("pending")), "resolved": bool(r.get("resolved")),
-                            "reason": r.get("reason")})
+                            "reason": r.get("reason"), "source": "apollo"})
         except Exception:
             pass
     return jsonify({"phone": cand.get("phone"), "has_phone": bool(cand.get("has_phone")),
-                    "pending": bool(cand.get("phone_pending")), "resolved": bool(cand.get("phone"))})
+                    "pending": bool(cand.get("phone_pending")), "resolved": bool(cand.get("phone")),
+                    "source": "apollo" if cand.get("phone") else None})
 
 
 @app.post("/api/people/<int:cid>/ai-refresh")

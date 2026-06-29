@@ -457,6 +457,11 @@ _MIGRATIONS = (
     ("candidates", "phone_request_id", "ALTER TABLE candidates ADD COLUMN phone_request_id VARCHAR(64) NULL"),
     ("candidates", "phone_pending", "ALTER TABLE candidates ADD COLUMN phone_pending TINYINT(1) NOT NULL DEFAULT 0"),
     ("candidates", "phone_requested_at", "ALTER TABLE candidates ADD COLUMN phone_requested_at DATETIME NULL"),
+    # LinkedIn-sourced contacts (extracted via OpenAI from the LinkedIn/CoreSignal profile).
+    # These take PRECEDENCE over Apollo values and are never overwritten once found.
+    ("candidates", "linkedin_email", "ALTER TABLE candidates ADD COLUMN linkedin_email VARCHAR(255) NULL"),
+    ("candidates", "linkedin_phone", "ALTER TABLE candidates ADD COLUMN linkedin_phone VARCHAR(64) NULL"),
+    ("candidates", "linkedin_contact_checked", "ALTER TABLE candidates ADD COLUMN linkedin_contact_checked TINYINT(1) NOT NULL DEFAULT 0"),
 )
 _MIGRATION_INDEXES = (
     ("companies", "idx_company_webchk", "ALTER TABLE companies ADD KEY idx_company_webchk (web_checked)"),
@@ -896,6 +901,15 @@ class CompanyRepo:
             conn.commit()
 
     @staticmethod
+    def queue_reprocess(company_id: int) -> None:
+        """Re-queue a company for the quality re-process pipeline (so the roster crawler and the
+        lead-upgrade crawler converge on ONE upgrade path — no record left on an older process)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE companies SET reprocessed_at=NULL WHERE id=%s", (company_id,))
+            conn.commit()
+
+    @staticmethod
     def reprocess_counts() -> dict:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -1005,7 +1019,7 @@ class CandidateRepo:
         "job_change_intent_score, company_quality_score, freshness_score, "
         "overall_candidate_score, enrichment_status, linkedin_enriched, coresignal_enriched, "
         "open_to_shift, intent_source, "
-        "email, phone, linkedin_url, location_city, location_country, "
+        "email, phone, linkedin_email, linkedin_phone, linkedin_url, location_city, location_country, "
         "discovered_at, last_verified_at, enriched_at")
 
     @staticmethod
@@ -1092,8 +1106,9 @@ class CandidateRepo:
                 return cur.fetchone()
 
     @staticmethod
-    def list_page(filters: dict, page: int = 1, page_size: int = 50) -> Tuple[List[dict], int]:
-        page, page_size, off = _page_bounds(page, page_size)
+    def list_page(filters: dict, page: int = 1, page_size: int = 50,
+                  max_size: int = 200) -> Tuple[List[dict], int]:
+        page, page_size, off = _page_bounds(page, page_size, max_size)
         where, params = ["1=1"], []
         if filters.get("department"):
             where.append("department=%s"); params.append(filters["department"])
@@ -1259,6 +1274,25 @@ class CandidateRepo:
         return n > 0
 
     @staticmethod
+    def set_linkedin_contacts(candidate_id: int, email: Optional[str], phone: Optional[str]) -> bool:
+        """Persist contacts extracted from the LinkedIn/CoreSignal profile. These take PRECEDENCE
+        over Apollo values and are NEVER overwritten once set (COALESCE keeps the first value).
+        Always marks the row checked so the crawler doesn't re-extract every pass. Returns True if
+        a new email or phone was stored."""
+        email = (email or "").strip()[:255] or None
+        phone = (phone or "").strip()[:64] or None
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE candidates SET linkedin_email=COALESCE(linkedin_email,%s), "
+                    "linkedin_phone=COALESCE(linkedin_phone,%s), linkedin_contact_checked=1, "
+                    "has_email=GREATEST(has_email, %s), has_phone=GREATEST(has_phone, %s) WHERE id=%s",
+                    (email, phone, 1 if email else 0, 1 if phone else 0, candidate_id))
+                n = cur.rowcount
+            conn.commit()
+        return bool((email or phone) and n)
+
+    @staticmethod
     def set_phone_request(candidate_id: int, request_id: str) -> None:
         """Record Apollo's async phone request_id so the reconciler can later poll
         GET /api/v1/webhook_result/{request_id} and pull the number — the reliable path
@@ -1282,6 +1316,21 @@ class CandidateRepo:
                     "AND phone_request_id<>'' AND (phone IS NULL OR phone='') "
                     "AND phone_requested_at > (NOW() - INTERVAL %s HOUR) "
                     "ORDER BY phone_requested_at ASC LIMIT %s", (int(max_age_hours), int(limit)))
+                return list(cur.fetchall() or [])
+
+    @staticmethod
+    def phone_reveal_candidates(limit: int = 10) -> List[dict]:
+        """Candidates Apollo SAYS have a direct phone (has_phone=1) but we haven't fetched yet and
+        aren't already waiting on — used by the proactive background reveal so phones fill in for
+        everyone over time, not only on a manual click. Highest-value (score) first."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, apollo_person_id, first_name, last_name, company_domain, linkedin_url "
+                    "FROM candidates WHERE has_phone=1 AND (phone IS NULL OR phone='') "
+                    "AND (linkedin_phone IS NULL OR linkedin_phone='') AND phone_pending=0 "
+                    "AND apollo_person_id IS NOT NULL AND apollo_person_id<>'' "
+                    "ORDER BY overall_candidate_score DESC, id DESC LIMIT %s", (int(limit),))
                 return list(cur.fetchall() or [])
 
     @staticmethod

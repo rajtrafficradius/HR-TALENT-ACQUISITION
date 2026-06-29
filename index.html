@@ -260,6 +260,10 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .emp-role .emp-dot{color:var(--t4);font-size:9px}
 .emp-role .emp-rt{font-size:12.5px;font-weight:500;color:var(--t1)}
 .emp-role .emp-rd{font-family:var(--mono);font-size:10px;color:var(--t4);margin-left:auto;white-space:nowrap}
+.cn.co-link{cursor:pointer}
+.cn.co-link:hover{color:var(--amber);text-decoration:underline}
+.cp-btn{background:none;border:1px solid var(--line);color:var(--t3);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 7px;line-height:1}
+.cp-btn:hover{color:var(--t1);border-color:var(--line3);background:var(--bg3)}
 .added-box{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--amber-soft);
   border:1px solid var(--amber-dim);border-radius:var(--rad);padding:10px 14px;margin-bottom:14px}
 .added-box .ab-time{font-family:var(--mono);font-size:13px;color:var(--amber);margin-top:4px}
@@ -621,6 +625,10 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
   // Website fallback: company row may lack a domain while the candidate carries company_domain.
   const coDomain=((co&&(co.root_domain||(co.website_url||'').replace(/^https?:\/\/(www\.)?/,'')))||c.company_domain||'').replace(/\/.*$/,'')||null;
   const coHref=coDomain?((co&&co.website_url)||('https://'+coDomain)):null;
+  // LinkedIn-sourced contacts take precedence over Apollo (server computes *_effective/*_source).
+  const effEmail=c.email_effective||c.email||'', effPhone=c.phone_effective||c.phone||'';
+  const emailSrc=c.email_source, phoneSrc=c.phone_source;
+  const copy=(v)=>{if(v&&navigator.clipboard){navigator.clipboard.writeText(v);toast('Copied: '+v,'ok');}};
   return <div className="panel-modal" onClick={e=>e.stopPropagation()}>
     <div className="dhead"><div className="top" style={{gap:13,alignItems:'flex-start'}}>
       {c.photo_url?<img className="pm-avatar" src={c.photo_url} alt="" referrerPolicy="no-referrer" onError={e=>{e.target.style.display='none';}}/>:<div className="pm-avatar ph">{initials}</div>}
@@ -691,10 +699,14 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
       <div className="sect"><div className="sect-h">Contact</div>
         <div className="contact-box">
           <div className="contact-row"><div className="ci">✉</div>
-            <div className="cv" style={{flex:1}}>{c.email?c.email:<span className="cv dim">{c.has_email?'Available — not revealed':'Not available'}</span>}</div></div>
+            <div className="cv" style={{flex:1}}>{effEmail?effEmail:<span className="cv dim">{c.has_email?'Available — not revealed':'Not available'}</span>}
+              {effEmail&&emailSrc==='linkedin'?<span className="src linkedin" style={{marginLeft:7}} title="From LinkedIn profile">in</span>:null}</div>
+            {effEmail?<button className="cp-btn" title="Copy email" onClick={e=>{e.stopPropagation();copy(effEmail);}}>⧉</button>:null}</div>
           <div className="contact-row"><div className="ci">☏</div>
-            <div className="cv" style={{flex:1}}>{c.phone?c.phone:<span className="cv dim">{phPending?<span className="ph-arriving"><span className="spin sm"/>Mobile arriving… (~3 min)</span>:(c.has_phone?'Mobile available — fetch it →':'Not available')}</span>}</div>
-            {(!c.phone&&c.has_phone&&!phPending)?<button className="btn btn-sm" disabled={phBusy} onClick={revealPhone} title="Apollo delivers the mobile async (~1-3 min)">{phBusy?<span className="spin sm"/>:'Get mobile'}</button>:null}</div>
+            <div className="cv" style={{flex:1}}>{effPhone?effPhone:<span className="cv dim">{phPending?<span className="ph-arriving"><span className="spin sm"/>Mobile arriving… (~3 min)</span>:(c.has_phone?'Mobile available — fetch it →':'Not available')}</span>}
+              {effPhone&&phoneSrc==='linkedin'?<span className="src linkedin" style={{marginLeft:7}} title="From LinkedIn profile">in</span>:null}</div>
+            {effPhone?<button className="cp-btn" title="Copy phone" onClick={e=>{e.stopPropagation();copy(effPhone);}}>⧉</button>:null}
+            {(!effPhone&&c.has_phone&&!phPending)?<button className="btn btn-sm" disabled={phBusy} onClick={revealPhone} title="Apollo delivers the mobile async (~1-3 min)">{phBusy?<span className="spin sm"/>:'Get mobile'}</button>:null}</div>
           <div className="contact-row"><div className="ci">in</div>
             {c.linkedin_url?<a className="cv" href={c.linkedin_url} target="_blank" rel="noopener" style={{flex:1}}>{c.linkedin_url.replace(/^https?:\/\/(www\.)?/,'')}</a>:
               <a className="cv" href={'https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent((c.full_name||'')+' '+(c.company_name||''))} target="_blank" rel="noopener" style={{flex:1}}>Search on LinkedIn ↗ <span style={{color:'var(--t4)'}}>(exact profile on Enrich)</span></a>}</div>
@@ -825,7 +837,7 @@ function CompanyDrawer({id,onClose,onPerson}){
 /* ── People view ─────────────────────────────────── */
 const FRESH=[['','Any time'],['7','Last 7 days'],['30','Last 30 days'],['90','Last 90 days']];
 const SORTS=[['overall','Overall score'],['intent','Job-change intent'],['recent','Recently added'],['company_quality','Company quality'],['technical','Technical'],['role_fit','Role fit'],['freshness','Freshness'],['name','Name A–Z']];
-function PeopleView({filters,setFilters,onPerson,refreshKey}){
+function PeopleView({filters,setFilters,onPerson,onCompany,refreshKey}){
   const [data,setData]=useState({rows:[],total:0,total_pages:1}),[page,setPage]=useState(1),[loading,setLoading]=useState(true);
   const f=filters,reqId=useRef(0);
   const load=useCallback(async()=>{const my=++reqId.current;setLoading(true);
@@ -837,25 +849,28 @@ function PeopleView({filters,setFilters,onPerson,refreshKey}){
   return <>
     <div className="mhead"><div className="count"><b>{data.total}</b> candidates</div><div className="spacer"/>
       {f.open_to_shift?<span className="badge-open"><span className="pulse"/>Open to shift only</span>:null}
-      {(f.department||f.category||f.country||f.enrichment_status)?<span className="kicker">filtered</span>:null}</div>
+      {(f.department||f.category||f.country||f.enrichment_status)?<span className="kicker">filtered</span>:null}
+      <button className="btn btn-sm" style={{marginLeft:10}} title="Export the current filtered list (with LinkedIn-first contacts) to CSV"
+        onClick={()=>{const q=new URLSearchParams();Object.entries(f).forEach(([k,v])=>{if(v!==''&&v!=null&&v!==0)q.set(k,v);});window.open('/api/people/export.csv?'+q.toString(),'_blank');}}>⤓ Export CSV</button></div>
     <div className="mscroll">
       {loading?<div className="empty"><span className="spin"/></div>:
        data.rows.length===0?<div className="empty"><div className="big">No candidates match</div>
          <div>Adjust filters, or run a discovery sweep.</div></div>:
-      <div className="rows">{data.rows.map(c=><div key={c.id} className="row row-people" onClick={()=>onPerson(c.id)}>
+      <div className="rows">{data.rows.map(c=>{const coClick=onCompany&&c.company_id;return <div key={c.id} className="row row-people" onClick={()=>onPerson(c.id)}>
         <div className="who"><div className="nm">{c.full_name}</div><div className="ttl">{c.title||'—'}</div></div>
-        <div className="cell-co col-hide"><div className="cell-sub">Company</div><div className="cn">{c.company_name||'—'}</div>
+        <div className="cell-co col-hide"><div className="cell-sub">Company</div>
+          <div className={cls('cn',coClick&&'co-link')} onClick={coClick?(e=>{e.stopPropagation();onCompany(c.company_id);}):undefined} title={coClick?'Open company':undefined}>{c.company_name||'—'}{coClick?' ↗':''}</div>
           <div className="cd">{c.company_domain||''}</div></div>
         <div className="col-hide" style={{display:'flex',flexDirection:'column',gap:6}}>
           <DeptTag d={c.department}/>{c.open_to_shift?<OpenBadge/>:<span className="src">{titleCase(c.seniority||'—')}</span>}</div>
         <Gauge label="Intent" value={c.job_change_intent_score}/>
         <div style={{display:'flex',flexDirection:'column',gap:7,alignItems:'flex-end'}}>
           <div className="scorebig"><span className="num" style={{fontSize:21,color:scoreColor(c.overall_candidate_score)}}>{c.overall_candidate_score}</span></div>
-          <div style={{display:'flex',gap:6,alignItems:'center'}}><Avail email={c.has_email||c.email} phone={c.has_phone||c.phone}/>
+          <div style={{display:'flex',gap:6,alignItems:'center'}}><Avail email={c.email_effective||c.has_email||c.email} phone={c.phone_effective||c.has_phone||c.phone}/>
             {c.enrichment_status==='enriched'?<span className="src history" title="Apollo enriched">A✓</span>:null}
             {c.coresignal_enriched?<span className="src cs" title="CoreSignal enriched">CS✓</span>:
               (c.linkedin_enriched?<span className="src linkedin" title="LinkedIn enriched">in</span>:null)}</div></div>
-      </div>)}</div>}
+      </div>;})}</div>}
       {data.total_pages>1&&<Pager page={page} pages={data.total_pages} set={setPage}/>}
     </div></>;
 }
@@ -1300,7 +1315,7 @@ function App(){
       <button className="iconbtn" title="Log out" onClick={logout}>⏻</button>
     </div>
     {tab==='people'&&<div className="body"><PeopleFilters f={pf} setF={setPf} meta={meta}/>
-      <div className="main"><PeopleView filters={pf} setFilters={setPf} onPerson={setPerson} refreshKey={rk}/></div></div>}
+      <div className="main"><PeopleView filters={pf} setFilters={setPf} onPerson={setPerson} onCompany={setCompany} refreshKey={rk}/></div></div>}
     {tab==='companies'&&<CompaniesView onCompany={setCompany} meta={meta}/>}
     {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast} meta={meta}/></div>}
     {tab==='linkedin'&&<div className="main"><LinkedInEnrichView toast={showToast} onChanged={()=>{refresh();loadStats();}} onPerson={setPerson}/></div>}
