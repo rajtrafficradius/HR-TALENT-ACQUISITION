@@ -866,7 +866,12 @@ def _recruit_params(src: dict) -> tuple:
     per = max(1, min(50, per))
     emphasis = core.normalize_emphasis(src.get("emphasis") or "balanced")
     region = (src.get("region") or src.get("country") or "").strip() or None
-    return per, emphasis, region
+    cats = src.get("categories")
+    if isinstance(cats, str):
+        cats = [c.strip() for c in cats.split(",") if c.strip()]
+    elif not isinstance(cats, list):
+        cats = None
+    return per, emphasis, region, (cats or None)
 
 
 @app.post("/api/recruit")
@@ -876,8 +881,8 @@ def api_recruit():
     recruit-fit composite. Returns the shortlist grouped by category."""
     if (r := _require_db()):
         return r
-    per, emphasis, region = _recruit_params(request.get_json(silent=True) or {})
-    return jsonify(core.build_recruit_shortlist(per, emphasis, region))
+    per, emphasis, region, cats = _recruit_params(request.get_json(silent=True) or {})
+    return jsonify(core.build_recruit_shortlist(per, emphasis, region, cats))
 
 
 @app.get("/api/recruit/export.csv")
@@ -887,8 +892,8 @@ def api_recruit_export():
     import csv, io
     if (r := _require_db()):
         return r
-    per, emphasis, region = _recruit_params(request.args)
-    result = core.build_recruit_shortlist(per, emphasis, region)
+    per, emphasis, region, cats = _recruit_params(request.args)
+    result = core.build_recruit_shortlist(per, emphasis, region, cats)
     cols = [("category", "Category"), ("full_name", "Name"), ("title", "Title"),
             ("company_name", "Company"), ("seniority", "Seniority"), ("location_country", "Country"),
             ("recruit_fit", "Recruit Fit"), ("overall_candidate_score", "Overall"),

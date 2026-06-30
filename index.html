@@ -265,30 +265,87 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .cp-btn{background:none;border:1px solid var(--line);color:var(--t3);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 7px;line-height:1}
 .cp-btn:hover{color:var(--t1);border-color:var(--line3);background:var(--bg3)}
 /* Recruit view */
-.rec-controls{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-end}
-.rec-controls .fgroup{flex:1;min-width:200px;margin:0}
-.rec-controls label{display:block;font-size:12px;color:var(--t2);margin-bottom:7px}
-.num-box{width:62px;background:var(--bg3);border:1px solid var(--line2);color:var(--amber);
-  font-family:var(--mono);font-weight:600;border-radius:7px;padding:4px 8px;text-align:center;font-size:13px}
-.sel{width:100%;background:var(--bg3);border:1px solid var(--line2);color:var(--t1);border-radius:8px;padding:9px 11px;font-size:13px}
+.rec-wrap{max-width:980px;margin:0 auto;padding:26px 24px 80px}
+.rec-head{margin-bottom:20px}
+.rec-head h2{font-family:var(--disp);font-weight:600;font-size:26px;letter-spacing:.01em;margin:5px 0 6px}
+.rec-head .lede{color:var(--t2);font-size:13.5px;max-width:680px;line-height:1.6}
+.num-box{width:64px;background:var(--bg3);border:1px solid var(--line2);color:var(--amber);
+  font-family:var(--mono);font-weight:600;border-radius:7px;padding:5px 8px;text-align:center;font-size:14px;font-variant-numeric:tabular-nums}
+.num-box:focus{outline:none;border-color:var(--amber)}
+.sel{width:100%;background:var(--bg3);border:1px solid var(--line2);color:var(--t1);border-radius:8px;padding:10px 12px;font-size:13px;cursor:pointer}
+.sel:focus{outline:none;border-color:var(--line3)}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg-full{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
 .seg-b{background:var(--bg3);border:1px solid var(--line2);color:var(--t2);border-radius:8px;
-  padding:8px 12px;font-size:12px;cursor:pointer;transition:all .14s}
+  padding:9px 10px;font-size:12px;cursor:pointer;transition:all .14s;text-align:center;white-space:nowrap}
 .seg-b:hover{color:var(--t1);border-color:var(--line3)}
 .seg-b.on{background:var(--amber);border-color:var(--amber);color:#1a1206;font-weight:600}
-.rec-run{display:flex;gap:12px;margin-top:18px;align-items:center}
-.rec-group{max-width:760px;margin:0 auto 22px}
-.rec-gh{display:flex;align-items:baseline;gap:10px;margin:8px 2px 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
-.rec-cat{font-family:var(--disp);font-weight:600;font-size:16px}
-.rec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:13px}
-.rec-card{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--rad2);padding:15px}
-.rec-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer}
-.rec-top .nm{font-weight:600;font-size:14px}
-.rec-top .ttl{font-size:11.5px;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rec-fit{text-align:center;flex-shrink:0}
-.rec-fit .num{font-family:var(--disp);font-weight:700;font-size:20px;line-height:1}
-.rec-g{display:flex;flex-direction:column;gap:7px;margin:13px 0 11px}
-.rec-actions{display:flex;align-items:center;gap:8px}
+/* control panel */
+.rec-panel{position:relative;overflow:hidden}
+.rec-panel::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--amber),transparent);opacity:.5}
+.rec-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.rec-field label{display:block;font-size:12px;color:var(--t2);margin-bottom:8px;font-weight:500}
+.rec-field .rangerow{margin-bottom:10px}
+.rec-slider{margin-top:2px}
+.rec-scale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--t4);margin-top:5px}
+.rec-roles{margin-top:22px;border-top:1px solid var(--line);padding-top:18px}
+.rec-roles-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.rec-roles-tools{display:flex;align-items:center;gap:10px}
+.mini-btn{background:var(--bg3);border:1px solid var(--line2);color:var(--t2);border-radius:6px;
+  padding:4px 11px;font-size:11px;cursor:pointer;transition:all .14s}
+.mini-btn:hover{color:var(--t1);border-color:var(--line3)}
+.catpick{display:flex;flex-wrap:wrap;gap:8px}
+.catchip{display:inline-flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--line2);
+  color:var(--t2);border-radius:9px;padding:8px 12px 8px 9px;font-size:12.5px;cursor:pointer;transition:all .15s}
+.catchip:hover{color:var(--t1);border-color:var(--line3)}
+.catchip-box{width:15px;height:15px;border-radius:5px;border:1px solid var(--line3);display:inline-flex;
+  align-items:center;justify-content:center;font-size:10px;color:transparent;transition:all .15s;flex-shrink:0}
+.catchip.on{background:var(--amber-soft);border-color:var(--amber);color:var(--t1)}
+.catchip.on .catchip-box{background:var(--amber);border-color:var(--amber);color:#1a1206;font-weight:800}
+.rec-run{display:flex;gap:12px;margin-top:22px;align-items:center}
+.rec-go{min-width:172px}
+/* summary + jump nav */
+.rec-empty{text-align:center;padding:48px 20px;color:var(--t3)}
+.rec-empty .big{font-family:var(--disp);font-size:17px;color:var(--t2);margin-bottom:6px}
+.rec-summary{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:1px;background:var(--line);
+  border:1px solid var(--line2);border-radius:var(--rad2);overflow:hidden;margin:26px 0 18px}
+.rstat{background:var(--bg2);padding:16px 18px}
+.rstat-n{font-family:var(--disp);font-weight:700;font-size:23px;color:var(--amber);line-height:1;font-variant-numeric:tabular-nums}
+.rstat-n.sm{font-size:15px;color:var(--t1)}
+.rstat-l{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--t3);margin-top:7px}
+.rec-jump{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:7px;padding:11px 0;margin-bottom:6px;
+  background:linear-gradient(var(--bg),var(--bg) 70%,transparent);backdrop-filter:blur(4px)}
+.jpill{display:inline-flex;align-items:center;gap:7px;background:var(--bg2);border:1px solid var(--line2);
+  color:var(--t2);border-radius:20px;padding:6px 9px 6px 13px;font-size:12px;cursor:pointer;transition:all .14s}
+.jpill:hover{color:var(--t1);border-color:var(--amber);background:var(--bg3)}
+.jpill-n{font-family:var(--mono);font-size:10px;background:var(--bg4);color:var(--t3);border-radius:10px;padding:1px 7px}
+/* category section + cards */
+.rec-section{margin-bottom:30px;scroll-margin-top:58px}
+.rec-sh{display:flex;align-items:center;gap:11px;margin-bottom:14px}
+.rec-sbar{width:3px;height:18px;border-radius:2px;background:var(--amber)}
+.rec-sh h3{font-family:var(--disp);font-weight:600;font-size:17px}
+.rec-scount{font-family:var(--mono);font-size:10.5px;color:var(--t3);letter-spacing:.05em}
+.rec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
+.rcard{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--rad2);padding:16px;
+  transition:transform .16s,border-color .16s,box-shadow .16s;animation:rcardin .4s ease both}
+.rcard:hover{transform:translateY(-3px);border-color:var(--line3);box-shadow:0 12px 30px -14px rgba(0,0,0,.6)}
+@keyframes rcardin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){.rcard{animation:none}.rcard:hover{transform:none}}
+.rcard-top{display:flex;align-items:flex-start;gap:11px}
+.rcard-rank{flex-shrink:0;width:22px;height:22px;border-radius:6px;background:var(--bg3);border:1px solid var(--line2);
+  font-family:var(--mono);font-size:11px;color:var(--t3);display:flex;align-items:center;justify-content:center;margin-top:1px}
+.rcard-id{flex:1;min-width:0;cursor:pointer}
+.rcard-id .nm{font-weight:600;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcard-id:hover .nm{color:var(--amber)}
+.rcard-id .ttl{font-size:11.5px;color:var(--t2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcard-co{font-size:11px;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcard-fit{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0}
+.rcard-fit .ring{width:46px;height:46px;font-size:14px}
+.rcard-gauges{display:flex;flex-direction:column;gap:8px;margin:14px 0 13px}
+.rcard-foot{display:flex;align-items:center;gap:9px}
+.rcard-cta{padding:7px 12px}
+@media (max-width:640px){.rec-grid{grid-template-columns:1fr;gap:18px}.rec-summary{grid-auto-flow:row;grid-auto-columns:auto}.rec-cards{grid-template-columns:1fr}}
 /* Outreach sequence panel */
 .seq-modal{max-width:680px}
 .seq-bar{display:flex;align-items:center;gap:10px;margin-bottom:16px}
@@ -1326,54 +1383,102 @@ function LinkedInEnrichView({toast,onChanged,onPerson}){
 /* ── Root app ────────────────────────────────────── */
 /* ── Recruit view ────────────────────────────────── */
 const EMPH=[['balanced','Balanced'],['intent','Most likely to move'],['skills','Best skills match']];
+const emphLabel=k=>(EMPH.find(e=>e[0]===k)||[])[1]||k;
+function RecruitCard({c,rank,i,onPerson,onSequence}){
+  const email=c.email||c.linkedin_email||c.has_email, phone=c.phone||c.linkedin_phone||c.has_phone;
+  return <div className="rcard" style={{animationDelay:Math.min(i*35,420)+'ms'}}>
+    <div className="rcard-top">
+      <span className="rcard-rank">{rank}</span>
+      <div className="rcard-id" onClick={()=>onPerson(c.id)} title="Open candidate profile">
+        <div className="nm">{c.full_name}</div>
+        <div className="ttl">{c.title||'—'}</div>
+        {c.company_name&&<div className="rcard-co">{c.company_name}</div>}</div>
+      <div className="rcard-fit"><Ring value={c.recruit_fit}/><div className="kicker">fit</div></div></div>
+    <div className="rcard-gauges">
+      <Gauge label="Role fit" value={c.role_fit_score}/>
+      <Gauge label="Intent" value={c.job_change_intent_score}/>
+      <Gauge label="Technical" value={c.technical_score}/></div>
+    <div className="rcard-foot">
+      {c.open_to_shift?<OpenBadge/>:<span className="src">{titleCase(c.seniority||'—')}</span>}
+      <Avail email={email} phone={phone}/>
+      {c.coresignal_enriched?<span className="src cs" title="LinkedIn-enriched">CS✓</span>:null}
+      <div className="spacer"/>
+      <button className="btn btn-sm rcard-cta" onClick={()=>onSequence(c.id)}>✍ Outreach</button></div>
+  </div>;
+}
 function RecruitView({toast,meta,onPerson,onSequence}){
-  const [n,setN]=useState(5),[emphasis,setEmphasis]=useState('balanced'),[region,setRegion]=useState('');
-  const [res,setRes]=useState(null),[loading,setLoading]=useState(false);
+  const allCats=(meta&&meta.categories)||[];
   const countries=(meta&&meta.countries)||['India','Australia'];
+  const [n,setN]=useState(5),[emphasis,setEmphasis]=useState('balanced'),[region,setRegion]=useState('');
+  const [cats,setCats]=useState(null);   // null = all roles
+  const [res,setRes]=useState(null),[loading,setLoading]=useState(false);
+  const selected = cats===null ? allCats : cats;
+  const isSel=c=>selected.indexOf(c)>=0;
+  const toggleCat=c=>setCats(prev=>{const base=prev===null?allCats.slice():prev;
+    return base.indexOf(c)>=0?base.filter(x=>x!==c):[...base,c];});
   const clampN=v=>Math.max(1,Math.min(50,parseInt(v,10)||1));
-  const run=async()=>{setLoading(true);
-    const r=await api('/api/recruit',{method:'POST',body:JSON.stringify({per_category:n,emphasis,region})});
+  const run=async()=>{ if(allCats.length&&selected.length===0)return toast('Pick at least one role to fill','bad');
+    setLoading(true);
+    const r=await api('/api/recruit',{method:'POST',body:JSON.stringify({per_category:n,emphasis,region,categories:selected})});
     setLoading(false); if(r&&r.groups)setRes(r); else toast('Could not build shortlist','bad');};
   const exportCsv=()=>{const q=new URLSearchParams({per_category:n,emphasis});if(region)q.set('region',region);
+    if(allCats.length&&selected.length&&selected.length<allCats.length)q.set('categories',selected.join(','));
     window.open('/api/recruit/export.csv?'+q.toString(),'_blank');};
-  return <div className="mscroll"><div className="disc">
-    <h2>Recruit</h2>
-    <p className="lede">Tell Radius how many openings you have per category — it shortlists the best-fit, most-movable candidates across all 12 categories, each ready for a grounded LinkedIn outreach sequence.</p>
-    <div className="panel">
-      <div className="rec-controls">
-        <div className="fgroup">
-          <div className="rangerow"><label style={{margin:0}}>Candidates per category</label>
+  const jump=i=>{const el=document.getElementById('rec-sec-'+i);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});};
+  const filled=res?res.groups.filter(g=>g.count>0):[];
+  return <div className="mscroll"><div className="rec-wrap">
+    <header className="rec-head">
+      <div className="kicker">Shortlist engine</div>
+      <h2>Recruit</h2>
+      <p className="lede">Choose the roles you’re filling and how many candidates you need for each — Radius ranks the best-fit, most-movable people in every selected category, each ready for a grounded LinkedIn outreach sequence.</p>
+    </header>
+
+    <div className="panel rec-panel">
+      <div className="rec-grid">
+        <div className="rec-field">
+          <div className="rangerow"><label>Openings per category</label>
             <input className="num-box" type="number" min="1" max="50" value={n} onChange={e=>setN(clampN(e.target.value))}/></div>
-          <input className="range" type="range" min="1" max="50" value={n} onChange={e=>setN(+e.target.value)}/></div>
-        <div className="fgroup"><label>Emphasis</label>
-          <div className="seg">{EMPH.map(([k,l])=><button key={k} className={cls('seg-b',emphasis===k&&'on')} onClick={()=>setEmphasis(k)}>{l}</button>)}</div></div>
-        <div className="fgroup"><label>Region</label>
+          <input className="range rec-slider" type="range" min="1" max="50" value={n} onChange={e=>setN(+e.target.value)}/>
+          <div className="rec-scale"><span>1</span><span>25</span><span>50</span></div></div>
+        <div className="rec-field">
+          <label>Emphasis</label>
+          <div className="seg seg-full">{EMPH.map(([k,l])=><button key={k} className={cls('seg-b',emphasis===k&&'on')} onClick={()=>setEmphasis(k)}>{l}</button>)}</div>
+          <label style={{marginTop:16}}>Region</label>
           <select className="sel" value={region} onChange={e=>setRegion(e.target.value)}>
             <option value="">Any region</option>{countries.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
       </div>
+      <div className="rec-roles">
+        <div className="rec-roles-head"><label>Roles to fill</label>
+          <div className="rec-roles-tools">
+            <span className="kicker">{selected.length}/{allCats.length} selected</span>
+            <button className="mini-btn" onClick={()=>setCats(null)}>All</button>
+            <button className="mini-btn" onClick={()=>setCats([])}>Clear</button></div></div>
+        <div className="catpick">{allCats.map(c=><button key={c} className={cls('catchip',isSel(c)&&'on')} onClick={()=>toggleCat(c)}>
+          <span className="catchip-box">{isSel(c)?'✓':''}</span>{c}</button>)}</div>
+      </div>
       <div className="rec-run">
-        <button className="btn btn-primary" disabled={loading} onClick={run}>{loading?<span className="spin"/>:'⚡ Build shortlist'}</button>
+        <button className="btn btn-primary rec-go" disabled={loading} onClick={run}>{loading?<span className="spin"/>:<>⚡ Build shortlist</>}</button>
         {res&&<button className="btn btn-sm" onClick={exportCsv}>⤓ Export CSV</button>}
-        {res&&<span className="kicker" style={{alignSelf:'center'}}>{res.total} candidates · {res.per_category}/category · {(EMPH.find(e=>e[0]===res.emphasis)||[])[1]}</span>}
       </div>
     </div>
-    {res&&res.total===0&&<div className="empty"><div className="big">No candidates yet</div>
-      <div>Run discovery (or widen the region) to populate the categories first.</div></div>}
-    {res&&res.groups.filter(g=>g.count>0).map(g=><div key={g.category} className="rec-group">
-      <div className="rec-gh"><span className="rec-cat">{g.category}</span><span className="kicker">{g.count}</span></div>
-      <div className="rec-cards">{g.candidates.map(c=><div key={c.id} className="rec-card">
-        <div className="rec-top" onClick={()=>onPerson(c.id)} title="Open candidate">
-          <div style={{minWidth:0}}><div className="nm">{c.full_name}</div>
-            <div className="ttl">{c.title||'—'}{c.company_name?(' · '+c.company_name):''}</div></div>
-          <div className="rec-fit"><div className="num" style={{color:scoreColor(c.recruit_fit)}}>{c.recruit_fit}</div><div className="kicker">fit</div></div></div>
-        <div className="rec-g"><Gauge label="Role fit" value={c.role_fit_score}/><Gauge label="Intent" value={c.job_change_intent_score}/><Gauge label="Technical" value={c.technical_score}/></div>
-        <div className="rec-actions">
-          {c.open_to_shift?<OpenBadge/>:<span className="src">{titleCase(c.seniority||'—')}</span>}
-          {c.coresignal_enriched?<span className="src cs" title="LinkedIn-enriched">CS✓</span>:null}
-          <div className="spacer"/>
-          <button className="btn btn-sm" onClick={()=>onSequence(c.id)}>✍ Outreach</button></div>
-      </div>)}</div>
-    </div>)}
+
+    {res&&res.total===0&&<div className="rec-empty"><div className="big">No candidates in these roles yet</div>
+      <div>Run a Discovery sweep, widen the region, or pick more roles above.</div></div>}
+
+    {res&&res.total>0&&<>
+      <div className="rec-summary">
+        <div className="rstat"><div className="rstat-n">{res.total.toLocaleString()}</div><div className="rstat-l">candidates</div></div>
+        <div className="rstat"><div className="rstat-n">{filled.length}</div><div className="rstat-l">roles filled</div></div>
+        <div className="rstat"><div className="rstat-n">{res.per_category}</div><div className="rstat-l">per role</div></div>
+        <div className="rstat"><div className="rstat-n sm">{emphLabel(res.emphasis)}</div><div className="rstat-l">emphasis</div></div>
+        {res.region&&<div className="rstat"><div className="rstat-n sm">{res.region}</div><div className="rstat-l">region</div></div>}
+      </div>
+      <div className="rec-jump">{filled.map((g,i)=><button key={g.category} className="jpill" onClick={()=>jump(i)}>{g.category}<span className="jpill-n">{g.count}</span></button>)}</div>
+      {filled.map((g,i)=><section key={g.category} id={'rec-sec-'+i} className="rec-section">
+        <div className="rec-sh"><span className="rec-sbar"/><h3>{g.category}</h3><span className="rec-scount">{g.count} candidate{g.count!==1?'s':''}</span></div>
+        <div className="rec-cards">{g.candidates.map((c,j)=><RecruitCard key={c.id} c={c} rank={j+1} i={j} onPerson={onPerson} onSequence={onSequence}/>)}</div>
+      </section>)}
+    </>}
   </div></div>;
 }
 

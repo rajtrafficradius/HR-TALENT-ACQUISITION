@@ -1926,15 +1926,23 @@ def recruit_fit_score(c: dict, emphasis: str = "balanced") -> int:
 
 
 def build_recruit_shortlist(per_category: int, emphasis: str = "balanced",
-                            country: Optional[str] = None) -> dict:
-    """For each of the 12 categories, pull a generous overall-ordered pool (index-friendly),
-    re-rank by the recruit-fit composite in Python, and take the top N. Stateless & FREE."""
+                            country: Optional[str] = None,
+                            categories: Optional[List[str]] = None) -> dict:
+    """For each chosen category (the roles the recruiter wants to fill; default all 12), pull a
+    generous overall-ordered pool (index-friendly), re-rank by the recruit-fit composite in Python,
+    and take the top N. Stateless & FREE."""
     per_category = max(1, min(50, int(per_category or 1)))
     emphasis = normalize_emphasis(emphasis)
     country = (country or "").strip() or None
+    # Roles to fill — normalise to the 12-taxonomy, preserve canonical order, default to all.
+    if categories:
+        want = {canonical_category(c) or c for c in categories}
+        chosen = [c for c in CATEGORY_LABELS if c in want] or list(CATEGORY_LABELS)
+    else:
+        chosen = list(CATEGORY_LABELS)
     pool_size = min(300, max(40, per_category * 5))
     groups, total = [], 0
-    for cat in CATEGORY_LABELS:
+    for cat in chosen:
         try:
             pool = db.CandidateRepo.recruit_pool(cat, country, pool_size)
         except Exception as e:
@@ -1948,7 +1956,7 @@ def build_recruit_shortlist(per_category: int, emphasis: str = "balanced",
         groups.append({"category": cat, "count": len(top), "candidates": top})
         total += len(top)
     return {"emphasis": emphasis, "per_category": per_category, "region": country,
-            "total": total, "groups": groups}
+            "categories": chosen, "total": total, "groups": groups}
 
 
 # ── LinkedIn outreach sequence (3 phased messages, grounded, deterministic fallback) ──

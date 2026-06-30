@@ -1206,9 +1206,9 @@ class CandidateRepo:
     _RECRUIT_COLS = (
         "id, full_name, title, company_name, company_id, company_domain, category, department, "
         "seniority, location_country, open_to_shift, enrichment_status, coresignal_enriched, "
-        "role_fit_score, job_change_intent_score, technical_score, company_quality_score, "
-        "freshness_score, overall_candidate_score, email, phone, linkedin_email, linkedin_phone, "
-        "linkedin_url")
+        "has_email, has_phone, role_fit_score, job_change_intent_score, technical_score, "
+        "company_quality_score, freshness_score, overall_candidate_score, email, phone, "
+        "linkedin_email, linkedin_phone, linkedin_url")
 
     @staticmethod
     def recruit_pool(category: str, country: Optional[str], limit: int) -> List[dict]:
