@@ -857,6 +857,126 @@ def api_recategorize():
     return jsonify({"ok": True, **res})
 
 
+# ── Recruit: shortlist top candidates per category + LinkedIn outreach sequences ──
+def _recruit_params(src: dict) -> tuple:
+    try:
+        per = int(src.get("per_category") or src.get("count") or 5)
+    except (TypeError, ValueError):
+        per = 5
+    per = max(1, min(50, per))
+    emphasis = core.normalize_emphasis(src.get("emphasis") or "balanced")
+    region = (src.get("region") or src.get("country") or "").strip() or None
+    return per, emphasis, region
+
+
+@app.post("/api/recruit")
+@require_auth
+def api_recruit():
+    """Stateless shortlist: top N candidates per category for N openings, re-ranked by the
+    recruit-fit composite. Returns the shortlist grouped by category."""
+    if (r := _require_db()):
+        return r
+    per, emphasis, region = _recruit_params(request.get_json(silent=True) or {})
+    return jsonify(core.build_recruit_shortlist(per, emphasis, region))
+
+
+@app.get("/api/recruit/export.csv")
+@require_auth
+def api_recruit_export():
+    """Export the current shortlist (all categories) as CSV with LinkedIn-first contacts."""
+    import csv, io
+    if (r := _require_db()):
+        return r
+    per, emphasis, region = _recruit_params(request.args)
+    result = core.build_recruit_shortlist(per, emphasis, region)
+    cols = [("category", "Category"), ("full_name", "Name"), ("title", "Title"),
+            ("company_name", "Company"), ("seniority", "Seniority"), ("location_country", "Country"),
+            ("recruit_fit", "Recruit Fit"), ("overall_candidate_score", "Overall"),
+            ("job_change_intent_score", "Intent"), ("role_fit_score", "Role Fit"),
+            ("technical_score", "Technical"), ("email_effective", "Email"),
+            ("phone_effective", "Phone"), ("linkedin_url", "LinkedIn")]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([h for _, h in cols])
+    for g in result["groups"]:
+        for c in g["candidates"]:
+            c.update(core.effective_contacts(c))
+            c["category"] = g["category"]
+            w.writerow([c.get(k, "") if c.get(k) is not None else "" for k, _ in cols])
+    from flask import Response
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=recruit_shortlist.csv"})
+
+
+def _seq_payload(candidate_id: int) -> dict:
+    """Format the stored sequence for the client (adds a live char count per message)."""
+    stored = db.RecruitRepo.get(candidate_id) or {}
+    msgs = stored.get("messages") or []
+    out = [{"phase": m["phase"], "body": m.get("body") or "", "source": m.get("source"),
+            "char_count": len(m.get("body") or "")} for m in msgs]
+    return {"ok": True, "source": stored.get("source"), "messages": out,
+            "outreach": core.outreach_status()}
+
+
+@app.post("/api/recruit/sequence/<int:cid>")
+@require_auth
+def api_recruit_sequence(cid):
+    """Get-or-generate a candidate's 3-message LinkedIn sequence. {regenerate:true} re-writes all
+    three; {regenerate:true, phase:N} re-writes only message N; otherwise returns the stored
+    sequence (generating + persisting it the first time)."""
+    if (r := _require_db()):
+        return r
+    cand = db.CandidateRepo.get(cid)
+    if not cand:
+        return jsonify({"error": "not_found"}), 404
+    company = db.CompanyRepo.get(cand["company_id"]) if cand.get("company_id") else None
+    data = request.get_json(silent=True) or {}
+    existing = db.RecruitRepo.get(cid)
+
+    if data.get("regenerate") and data.get("phase"):
+        msg = core.regenerate_recruit_message(cand, company, int(data["phase"]))
+        db.RecruitRepo.update_message(cid, msg["phase"], msg["body"], msg.get("source"))
+        return jsonify(_seq_payload(cid))
+
+    if data.get("regenerate") or not existing:
+        gen = core.generate_recruit_sequence(cand, company)
+        db.RecruitRepo.save(cid, gen.get("source"), gen["messages"])
+        return jsonify(_seq_payload(cid))
+
+    return jsonify(_seq_payload(cid))
+
+
+@app.put("/api/recruit/sequence/<int:cid>")
+@require_auth
+def api_recruit_sequence_save(cid):
+    """Persist recruiter edits to the three messages."""
+    if (r := _require_db()):
+        return r
+    if not db.CandidateRepo.get(cid):
+        return jsonify({"error": "not_found"}), 404
+    data = request.get_json(silent=True) or {}
+    msgs = [{"phase": int(m.get("phase")), "body": m.get("body") or "", "source": "edited"}
+            for m in (data.get("messages") or []) if m.get("phase") in (1, 2, 3, "1", "2", "3")]
+    if msgs:
+        db.RecruitRepo.save(cid, "edited", msgs)
+    return jsonify(_seq_payload(cid))
+
+
+@app.post("/api/recruit/sequence/<int:cid>/send")
+@require_auth
+def api_recruit_send(cid):
+    """RESERVED — automated LinkedIn DM send. Inert until the provider is configured; returns a
+    disabled result so the UI keeps to manual copy-paste delivery."""
+    if (r := _require_db()):
+        return r
+    cand = db.CandidateRepo.get(cid)
+    if not cand:
+        return jsonify({"error": "not_found"}), 404
+    stored = db.RecruitRepo.get(cid) or {}
+    res = core.outreach_send(cand, stored.get("messages") or [])
+    return jsonify(res), (200 if res.get("ok") else 501)
+
+
 @app.get("/api/runs")
 @require_auth
 def api_runs():

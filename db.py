@@ -424,6 +424,35 @@ _SCHEMA_SQL: Sequence[str] = (
         PRIMARY KEY (k)
     ) {_TBL}
     """,
+    # 7) recruit_sequences — one persisted LinkedIn outreach sequence per candidate
+    f"""
+    CREATE TABLE IF NOT EXISTS recruit_sequences (
+        id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        candidate_id BIGINT UNSIGNED NOT NULL,
+        source       VARCHAR(16) NULL,
+        created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_seq_candidate (candidate_id),
+        CONSTRAINT fk_seq_cand FOREIGN KEY (candidate_id)
+            REFERENCES candidates(id) ON DELETE CASCADE
+    ) {_TBL}
+    """,
+    # 8) recruit_messages — the three phased messages belonging to a sequence
+    f"""
+    CREATE TABLE IF NOT EXISTS recruit_messages (
+        id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        sequence_id BIGINT UNSIGNED NOT NULL,
+        phase       TINYINT NOT NULL,
+        body        TEXT NULL,
+        source      VARCHAR(16) NULL,
+        updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_msg_phase (sequence_id, phase),
+        CONSTRAINT fk_msg_seq FOREIGN KEY (sequence_id)
+            REFERENCES recruit_sequences(id) ON DELETE CASCADE
+    ) {_TBL}
+    """,
 )
 
 # Columns added after v1 — applied to already-existing tables by migrate().
@@ -513,7 +542,7 @@ def init_schema() -> None:
                 cur.execute(stmt)
         conn.commit()
     migrate()
-    log.info("Schema verified (6 tables).")
+    log.info("Schema verified (8 tables).")
 
 
 def drop_all() -> None:
@@ -521,8 +550,8 @@ def drop_all() -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SET FOREIGN_KEY_CHECKS=0")
-            for t in ("enrichment_log", "candidates", "companies", "runs", "reveal_counter",
-                      "app_settings"):
+            for t in ("recruit_messages", "recruit_sequences", "enrichment_log", "candidates",
+                      "companies", "runs", "reveal_counter", "app_settings"):
                 cur.execute(f"DROP TABLE IF EXISTS {t}")
             cur.execute("SET FOREIGN_KEY_CHECKS=1")
         conn.commit()
@@ -1174,6 +1203,30 @@ class CandidateRepo:
                             "LIMIT %s", (company_id, limit))
                 return list(cur.fetchall() or [])
 
+    _RECRUIT_COLS = (
+        "id, full_name, title, company_name, company_id, company_domain, category, department, "
+        "seniority, location_country, open_to_shift, enrichment_status, coresignal_enriched, "
+        "role_fit_score, job_change_intent_score, technical_score, company_quality_score, "
+        "freshness_score, overall_candidate_score, email, phone, linkedin_email, linkedin_phone, "
+        "linkedin_url")
+
+    @staticmethod
+    def recruit_pool(category: str, country: Optional[str], limit: int) -> List[dict]:
+        """A generous, index-friendly pool for ONE category, ordered by overall score (hits
+        idx_cand_category + idx_cand_overall). The recruit-fit re-rank happens in Python."""
+        where = ["category=%s"]
+        params: list = [category]
+        if country:
+            where.append("location_country=%s")
+            params.append(country)
+        params.append(int(limit))
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT {CandidateRepo._RECRUIT_COLS} FROM candidates "
+                            f"WHERE {' AND '.join(where)} "
+                            "ORDER BY overall_candidate_score DESC, id DESC LIMIT %s", params)
+                return list(cur.fetchall() or [])
+
     @staticmethod
     def set_enriching(candidate_id: int) -> bool:
         with get_conn() as conn:
@@ -1646,6 +1699,64 @@ class StatsRepo:
                 out["last_run_at"] = last["started_at"] if last else None
                 out["last_run_state"] = last["state"] if last else None
         return out
+
+
+class RecruitRepo:
+    """Persistence for LinkedIn outreach sequences (one per candidate) + their 3 messages."""
+
+    @staticmethod
+    def _ensure_sequence(cur, candidate_id: int, source: Optional[str]) -> int:
+        cur.execute("INSERT INTO recruit_sequences (candidate_id, source) VALUES (%s,%s) "
+                    "ON DUPLICATE KEY UPDATE source=COALESCE(VALUES(source),source), id=LAST_INSERT_ID(id)",
+                    (candidate_id, source))
+        cur.execute("SELECT id FROM recruit_sequences WHERE candidate_id=%s", (candidate_id,))
+        return int(cur.fetchone()["id"])
+
+    @staticmethod
+    def save(candidate_id: int, source: Optional[str], messages: list) -> dict:
+        """Upsert the sequence and its three phased messages (idempotent on candidate+phase)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                sid = RecruitRepo._ensure_sequence(cur, candidate_id, source)
+                for m in messages:
+                    phase = int(m.get("phase"))
+                    if phase not in (1, 2, 3):
+                        continue
+                    cur.execute(
+                        "INSERT INTO recruit_messages (sequence_id, phase, body, source) "
+                        "VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE body=VALUES(body), "
+                        "source=VALUES(source)",
+                        (sid, phase, (m.get("body") or "")[:4000], (m.get("source") or source or "")[:16]))
+            conn.commit()
+        return RecruitRepo.get(candidate_id)
+
+    @staticmethod
+    def update_message(candidate_id: int, phase: int, body: str, source: Optional[str]) -> dict:
+        """Persist an edit/regenerate of a single message."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                sid = RecruitRepo._ensure_sequence(cur, candidate_id, None)
+                cur.execute(
+                    "INSERT INTO recruit_messages (sequence_id, phase, body, source) "
+                    "VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE body=VALUES(body), source=VALUES(source)",
+                    (sid, int(phase), (body or "")[:4000], (source or "")[:16]))
+            conn.commit()
+        return RecruitRepo.get(candidate_id)
+
+    @staticmethod
+    def get(candidate_id: int) -> Optional[dict]:
+        """Return {source, updated_at, messages:[{phase, body, source}]} or None if no sequence."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, source, updated_at FROM recruit_sequences WHERE candidate_id=%s",
+                            (candidate_id,))
+                seq = cur.fetchone()
+                if not seq:
+                    return None
+                cur.execute("SELECT phase, body, source FROM recruit_messages WHERE sequence_id=%s "
+                            "ORDER BY phase", (seq["id"],))
+                msgs = list(cur.fetchall() or [])
+        return {"source": seq.get("source"), "updated_at": seq.get("updated_at"), "messages": msgs}
 
 
 class SettingsRepo:

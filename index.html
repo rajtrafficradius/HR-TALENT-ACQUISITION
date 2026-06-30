@@ -264,6 +264,47 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .cn.co-link:hover{color:var(--amber);text-decoration:underline}
 .cp-btn{background:none;border:1px solid var(--line);color:var(--t3);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 7px;line-height:1}
 .cp-btn:hover{color:var(--t1);border-color:var(--line3);background:var(--bg3)}
+/* Recruit view */
+.rec-controls{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-end}
+.rec-controls .fgroup{flex:1;min-width:200px;margin:0}
+.rec-controls label{display:block;font-size:12px;color:var(--t2);margin-bottom:7px}
+.num-box{width:62px;background:var(--bg3);border:1px solid var(--line2);color:var(--amber);
+  font-family:var(--mono);font-weight:600;border-radius:7px;padding:4px 8px;text-align:center;font-size:13px}
+.sel{width:100%;background:var(--bg3);border:1px solid var(--line2);color:var(--t1);border-radius:8px;padding:9px 11px;font-size:13px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg-b{background:var(--bg3);border:1px solid var(--line2);color:var(--t2);border-radius:8px;
+  padding:8px 12px;font-size:12px;cursor:pointer;transition:all .14s}
+.seg-b:hover{color:var(--t1);border-color:var(--line3)}
+.seg-b.on{background:var(--amber);border-color:var(--amber);color:#1a1206;font-weight:600}
+.rec-run{display:flex;gap:12px;margin-top:18px;align-items:center}
+.rec-group{max-width:760px;margin:0 auto 22px}
+.rec-gh{display:flex;align-items:baseline;gap:10px;margin:8px 2px 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.rec-cat{font-family:var(--disp);font-weight:600;font-size:16px}
+.rec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:13px}
+.rec-card{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--rad2);padding:15px}
+.rec-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer}
+.rec-top .nm{font-weight:600;font-size:14px}
+.rec-top .ttl{font-size:11.5px;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rec-fit{text-align:center;flex-shrink:0}
+.rec-fit .num{font-family:var(--disp);font-weight:700;font-size:20px;line-height:1}
+.rec-g{display:flex;flex-direction:column;gap:7px;margin:13px 0 11px}
+.rec-actions{display:flex;align-items:center;gap:8px}
+/* Outreach sequence panel */
+.seq-modal{max-width:680px}
+.seq-bar{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.seq-msg{border:1px solid var(--line2);border-radius:var(--rad2);padding:13px;margin-bottom:13px;background:var(--bg2)}
+.seq-mh{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.seq-n{width:20px;height:20px;border-radius:50%;background:var(--amber);color:#1a1206;font-weight:700;
+  font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.seq-t{font-weight:600;font-size:13px}
+.seq-hint{letter-spacing:.04em}
+.seq-cc{font-family:var(--mono);font-size:10.5px;color:var(--t3)}
+.seq-cc.over{color:#e0644f}
+.seq-ta{width:100%;background:var(--bg);border:1px solid var(--line2);color:var(--t1);border-radius:8px;
+  padding:10px 12px;font-size:13px;line-height:1.5;resize:vertical;font-family:inherit}
+.seq-ta:focus{outline:none;border-color:var(--line3)}
+.seq-foot{display:flex;align-items:center;gap:12px;margin-top:6px}
+.seq-note{font-size:11.5px;color:var(--t3);flex:1}
 .added-box{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--amber-soft);
   border:1px solid var(--amber-dim);border-radius:var(--rad);padding:10px 14px;margin-bottom:14px}
 .added-box .ab-time{font-family:var(--mono);font-size:13px;color:var(--amber);margin-top:4px}
@@ -570,7 +611,7 @@ function empSpan(roles){const s=roles[roles.length-1]?.start||roles[0]?.start;
   return (s||'?')+' — '+(e||'?');}
 
 /* ── Person drawer ───────────────────────────────── */
-function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
+function PersonDrawer({id,onClose,onChanged,toast,onCompany,onSequence}){
   const [d,setD]=useState(null),[busy,setBusy]=useState(false),[rE,setRE]=useState(true),[rP,setRP]=useState(true),[liBusy,setLiBusy]=useState(false),[phBusy,setPhBusy]=useState(false);
   const [expl,setExpl]=useState({}),[phPending,setPhPending]=useState(false),[aiBusy,setAiBusy]=useState(false);
   const phPoll=useRef(null),autoPoll=useRef(0);
@@ -725,6 +766,11 @@ function PersonDrawer({id,onClose,onChanged,toast,onCompany}){
               <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--t4)',marginTop:2}}>CoreSignal LinkedIn profile + AI · uses credits</div></div>
             <button className="btn btn-sm li-drawer-btn" disabled={liBusy} onClick={linkedinEnrich}>
               {liBusy?<span className="spin"/>:(c.coresignal_enriched?'↻ Re-enrich LinkedIn':'Enrich via LinkedIn')}</button></div>
+          {onSequence&&<div className="enrich-ctl" style={{marginTop:12,borderTop:'1px solid var(--line)',paddingTop:12}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12.5,color:'var(--t2)'}}>LinkedIn outreach sequence</div>
+              <div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--t4)',marginTop:2}}>3 grounded, editable messages · copy &amp; send manually</div></div>
+            <button className="btn btn-sm" onClick={()=>onSequence(c.id)}>✍ Outreach</button></div>}
         </div></div>
 
       {eh.length>0&&(()=>{const grouped=groupEmployment(eh);return(
@@ -1278,11 +1324,108 @@ function LinkedInEnrichView({toast,onChanged,onPerson}){
 }
 
 /* ── Root app ────────────────────────────────────── */
+/* ── Recruit view ────────────────────────────────── */
+const EMPH=[['balanced','Balanced'],['intent','Most likely to move'],['skills','Best skills match']];
+function RecruitView({toast,meta,onPerson,onSequence}){
+  const [n,setN]=useState(5),[emphasis,setEmphasis]=useState('balanced'),[region,setRegion]=useState('');
+  const [res,setRes]=useState(null),[loading,setLoading]=useState(false);
+  const countries=(meta&&meta.countries)||['India','Australia'];
+  const clampN=v=>Math.max(1,Math.min(50,parseInt(v,10)||1));
+  const run=async()=>{setLoading(true);
+    const r=await api('/api/recruit',{method:'POST',body:JSON.stringify({per_category:n,emphasis,region})});
+    setLoading(false); if(r&&r.groups)setRes(r); else toast('Could not build shortlist','bad');};
+  const exportCsv=()=>{const q=new URLSearchParams({per_category:n,emphasis});if(region)q.set('region',region);
+    window.open('/api/recruit/export.csv?'+q.toString(),'_blank');};
+  return <div className="mscroll"><div className="disc">
+    <h2>Recruit</h2>
+    <p className="lede">Tell Radius how many openings you have per category — it shortlists the best-fit, most-movable candidates across all 12 categories, each ready for a grounded LinkedIn outreach sequence.</p>
+    <div className="panel">
+      <div className="rec-controls">
+        <div className="fgroup">
+          <div className="rangerow"><label style={{margin:0}}>Candidates per category</label>
+            <input className="num-box" type="number" min="1" max="50" value={n} onChange={e=>setN(clampN(e.target.value))}/></div>
+          <input className="range" type="range" min="1" max="50" value={n} onChange={e=>setN(+e.target.value)}/></div>
+        <div className="fgroup"><label>Emphasis</label>
+          <div className="seg">{EMPH.map(([k,l])=><button key={k} className={cls('seg-b',emphasis===k&&'on')} onClick={()=>setEmphasis(k)}>{l}</button>)}</div></div>
+        <div className="fgroup"><label>Region</label>
+          <select className="sel" value={region} onChange={e=>setRegion(e.target.value)}>
+            <option value="">Any region</option>{countries.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+      </div>
+      <div className="rec-run">
+        <button className="btn btn-primary" disabled={loading} onClick={run}>{loading?<span className="spin"/>:'⚡ Build shortlist'}</button>
+        {res&&<button className="btn btn-sm" onClick={exportCsv}>⤓ Export CSV</button>}
+        {res&&<span className="kicker" style={{alignSelf:'center'}}>{res.total} candidates · {res.per_category}/category · {(EMPH.find(e=>e[0]===res.emphasis)||[])[1]}</span>}
+      </div>
+    </div>
+    {res&&res.total===0&&<div className="empty"><div className="big">No candidates yet</div>
+      <div>Run discovery (or widen the region) to populate the categories first.</div></div>}
+    {res&&res.groups.filter(g=>g.count>0).map(g=><div key={g.category} className="rec-group">
+      <div className="rec-gh"><span className="rec-cat">{g.category}</span><span className="kicker">{g.count}</span></div>
+      <div className="rec-cards">{g.candidates.map(c=><div key={c.id} className="rec-card">
+        <div className="rec-top" onClick={()=>onPerson(c.id)} title="Open candidate">
+          <div style={{minWidth:0}}><div className="nm">{c.full_name}</div>
+            <div className="ttl">{c.title||'—'}{c.company_name?(' · '+c.company_name):''}</div></div>
+          <div className="rec-fit"><div className="num" style={{color:scoreColor(c.recruit_fit)}}>{c.recruit_fit}</div><div className="kicker">fit</div></div></div>
+        <div className="rec-g"><Gauge label="Role fit" value={c.role_fit_score}/><Gauge label="Intent" value={c.job_change_intent_score}/><Gauge label="Technical" value={c.technical_score}/></div>
+        <div className="rec-actions">
+          {c.open_to_shift?<OpenBadge/>:<span className="src">{titleCase(c.seniority||'—')}</span>}
+          {c.coresignal_enriched?<span className="src cs" title="LinkedIn-enriched">CS✓</span>:null}
+          <div className="spacer"/>
+          <button className="btn btn-sm" onClick={()=>onSequence(c.id)}>✍ Outreach</button></div>
+      </div>)}</div>
+    </div>)}
+  </div></div>;
+}
+
+/* ── LinkedIn outreach sequence panel (reachable from Recruit cards + PersonDrawer) ── */
+const SEQ_PH=[[1,'Connection request','≤300 chars · specific hook'],[2,'Value message','why you · the role · what’s in it for them'],[3,'Soft nudge','graceful follow-up + clear CTA']];
+function SequencePanel({id,onClose,toast}){
+  const [seq,setSeq]=useState(null),[busy,setBusy]=useState(false),[regen,setRegen]=useState(0),[saving,setSaving]=useState(false);
+  const copy=(v)=>{if(v&&navigator.clipboard){navigator.clipboard.writeText(v);toast('Copied to clipboard','ok');}};
+  const load=useCallback(async(body)=>{setBusy(true);
+    const r=await api('/api/recruit/sequence/'+id,{method:'POST',body:JSON.stringify(body||{})});
+    setBusy(false); if(r&&r.messages)setSeq(r); else toast('Could not load the sequence','bad');},[id]);
+  useEffect(()=>{load();},[load]);
+  const setBody=(phase,body)=>setSeq(s=>({...s,messages:s.messages.map(m=>m.phase===phase?{...m,body,char_count:body.length}:m)}));
+  const regenOne=async(phase)=>{if(regen)return;setRegen(phase);
+    const r=await api('/api/recruit/sequence/'+id,{method:'POST',body:JSON.stringify({regenerate:true,phase})});
+    setRegen(0); if(r&&r.messages){setSeq(r);toast('Message '+phase+' regenerated','ok');}};
+  const save=async()=>{if(!seq)return;setSaving(true);
+    const r=await api('/api/recruit/sequence/'+id,{method:'PUT',body:JSON.stringify({messages:seq.messages.map(m=>({phase:m.phase,body:m.body}))})});
+    setSaving(false); if(r&&r.messages){setSeq(r);toast('Sequence saved','ok');}};
+  return <div className="modal-scrim" onClick={onClose}>
+    <div className="panel-modal seq-modal" onClick={e=>e.stopPropagation()}>
+      <div className="dhead"><div className="top"><div><h2>LinkedIn outreach</h2>
+        <div className="role">3-step sequence · grounded in this candidate’s profile</div></div>
+        <button className="iconbtn" onClick={onClose}>✕</button></div></div>
+      <div className="dbody">
+        {!seq?<div className="empty"><span className="spin"/></div>:<>
+        <div className="seq-bar">
+          <span className={cls('ai-badge',seq.source!=='ai'&&'derived')}>{seq.source==='ai'?'AI ✓':'Derived'}</span>
+          <span className="cell-sub" style={{margin:0}}>Review &amp; edit, then copy each message into LinkedIn</span>
+          <div className="spacer"/>
+          <button className="btn btn-sm" disabled={busy} onClick={()=>load({regenerate:true})}>{busy?<span className="spin sm"/>:'↻ Regenerate all'}</button></div>
+        {seq.messages.map(m=>{const spec=SEQ_PH.find(p=>p[0]===m.phase)||[];return <div key={m.phase} className="seq-msg">
+          <div className="seq-mh"><span className="seq-n">{m.phase}</span><span className="seq-t">{spec[1]}</span>
+            <span className="kicker seq-hint">{spec[2]}</span><div className="spacer"/>
+            {m.phase===1&&<span className={cls('seq-cc',(m.char_count>300)&&'over')}>{m.char_count}/300</span>}
+            <button className="cp-btn" title="Regenerate this message" disabled={regen===m.phase} onClick={()=>regenOne(m.phase)}>{regen===m.phase?'…':'↻'}</button>
+            <button className="cp-btn" title="Copy this message" onClick={()=>copy(m.body)}>⧉</button></div>
+          <textarea className="seq-ta" value={m.body} onChange={e=>setBody(m.phase,e.target.value)} rows={m.phase===1?3:5}/></div>;})}
+        <div className="seq-foot">
+          <div className="seq-note">Delivery is manual — copy each message and send it from your own LinkedIn.{seq.outreach&&!seq.outreach.enabled?' Automated sending is reserved for a future release.':''}</div>
+          <div className="spacer"/>
+          <button className="btn btn-primary btn-sm" disabled={saving} onClick={save}>{saving?<span className="spin"/>:'Save drafts'}</button></div>
+        </>}
+      </div>
+    </div></div>;
+}
+
 function App(){
   const [authed,setAuthed]=useState(null),[tab,setTab]=useState('people');
   const [stats,setStats]=useState({}),[meta,setMeta]=useState({});
   const [pf,setPf]=useState({sort:'overall'});
-  const [person,setPerson]=useState(null),[company,setCompany]=useState(null);
+  const [person,setPerson]=useState(null),[company,setCompany]=useState(null),[seqFor,setSeqFor]=useState(null);
   const [toast,setToast]=useState(null),[rk,setRk]=useState(0);
   const showToast=(m,k)=>{setToast({m,k});setTimeout(()=>setToast(null),3200);};
   const refresh=()=>setRk(x=>x+1);
@@ -1297,7 +1440,7 @@ function App(){
     <div className="topbar">
       <div className="brand-mark"><div className="brand-dot"/><div>
         <div className="brand-name" style={{fontSize:15}}>RADIUS</div><div className="brand-sub">Talent Acquisition</div></div></div>
-      <div className="nav">{['people','companies','discovery'].map(t=>
+      <div className="nav">{['people','companies','discovery','recruit'].map(t=>
         <button key={t} className={cls(tab===t&&'on')} onClick={()=>setTab(t)}>{t}</button>)}</div>
       <div className="spacer"/>
       <button className={cls('li-enrich-btn',tab==='linkedin'&&'on')} onClick={()=>setTab('linkedin')}
@@ -1318,12 +1461,14 @@ function App(){
       <div className="main"><PeopleView filters={pf} setFilters={setPf} onPerson={setPerson} onCompany={setCompany} refreshKey={rk}/></div></div>}
     {tab==='companies'&&<CompaniesView onCompany={setCompany} meta={meta}/>}
     {tab==='discovery'&&<div className="main"><DiscoveryView onDone={refresh} toast={showToast} meta={meta}/></div>}
+    {tab==='recruit'&&<div className="main"><RecruitView toast={showToast} meta={meta} onPerson={setPerson} onSequence={setSeqFor}/></div>}
     {tab==='linkedin'&&<div className="main"><LinkedInEnrichView toast={showToast} onChanged={()=>{refresh();loadStats();}} onPerson={setPerson}/></div>}
 
     {person&&<div className="modal-scrim" onClick={()=>setPerson(null)}>
-      <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast} onCompany={(coid)=>{setPerson(null);setCompany(coid);}}/></div>}
+      <PersonDrawer id={person} onClose={()=>setPerson(null)} onChanged={()=>{refresh();loadStats();}} toast={showToast} onCompany={(coid)=>{setPerson(null);setCompany(coid);}} onSequence={(pid)=>setSeqFor(pid)}/></div>}
     {company&&<><div className="scrim" onClick={()=>setCompany(null)}/>
       <CompanyDrawer id={company} onClose={()=>setCompany(null)} onPerson={(pid)=>{setCompany(null);setPerson(pid);}}/></>}
+    {seqFor&&<SequencePanel id={seqFor} onClose={()=>setSeqFor(null)} toast={showToast}/>}
     {toast&&<div className={cls('toast',toast.k)}>{toast.k==='ok'?'✓':'⚠'} {toast.m}</div>}
   </div>;
 }

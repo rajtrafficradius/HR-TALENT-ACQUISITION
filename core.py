@@ -1590,6 +1590,45 @@ class LinkedInIntentProvider(IntentProvider):
 _PROVIDERS: List[IntentProvider] = [ApolloIntentProvider(), LinkedInIntentProvider()]
 
 
+class LinkedInOutreachProvider:
+    """RESERVED — automated LinkedIn direct messaging. INERT until both LINKEDIN_DM_ENABLED=1 and
+    LINKEDIN_DM_API_KEY are set. Mirrors the LinkedInIntentProvider reservation pattern: the
+    sequence generation and persistence already exist, so switching this on later needs no schema
+    change and no rework — only an implementation of send(). Delivery is manual copy-paste today."""
+    name = "linkedin_dm"
+
+    def enabled(self) -> bool:
+        return _env("LINKEDIN_DM_ENABLED", "0") == "1" and bool(_env("LINKEDIN_DM_API_KEY"))
+
+    def send(self, candidate: dict, messages: list) -> dict:  # pragma: no cover - future
+        # TODO(LinkedIn DM): call the LinkedIn messaging API/automation here, sending ONLY the
+        # recruiter-reviewed stored messages, respecting per-day send limits and connection state.
+        raise NotImplementedError("Automated LinkedIn DM send not implemented")
+
+
+_OUTREACH_PROVIDER = LinkedInOutreachProvider()
+
+
+def outreach_status() -> dict:
+    """Whether automated LinkedIn DM sending is available (reserved seam; manual for now)."""
+    return {"enabled": _OUTREACH_PROVIDER.enabled(), "provider": _OUTREACH_PROVIDER.name,
+            "mode": "automated" if _OUTREACH_PROVIDER.enabled() else "manual_copy_paste"}
+
+
+def outreach_send(candidate: dict, messages: list) -> dict:
+    """Inert dispatcher for automated LinkedIn DMs. Returns a disabled result unless the reserved
+    provider is switched on — delivery is manual copy-paste from the recruiter's own LinkedIn."""
+    if not _OUTREACH_PROVIDER.enabled():
+        return {"ok": False, "disabled": True, "reason": "manual_only",
+                "message": "Automated LinkedIn DMs are reserved — copy each message and send it "
+                           "from your own LinkedIn."}
+    try:
+        return _OUTREACH_PROVIDER.send(candidate, messages)  # pragma: no cover - future
+    except NotImplementedError:
+        return {"ok": False, "disabled": True, "reason": "stub",
+                "message": "LinkedIn DM provider is enabled but send() is not implemented yet."}
+
+
 def compute_intent(c: dict) -> Tuple[int, str, dict]:
     """Blend all enabled intent providers; the highest-priority source wins
     (linkedin > history > heuristic)."""
@@ -1849,6 +1888,203 @@ def generate_company_summary(company: dict) -> dict:
     except Exception as e:
         log.warning("ai company summary failed (%s) — using deterministic", e)
     return {"summary": _deterministic_company_summary(f), "source": "derived"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Recruit — shortlist top candidates per category + LinkedIn outreach sequences
+#  Reuses the SAME stored six-dimension scores; re-ranks with a recruit-fit
+#  composite that drops freshness and leans on role-fit / intent / technical.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Emphasis presets (freshness deliberately excluded — staleness shouldn't sink a great hire).
+RECRUIT_EMPHASIS = {
+    "balanced": {"role_fit": 0.40, "intent": 0.30, "technical": 0.20, "company_quality": 0.10},
+    "intent":   {"intent": 0.50, "role_fit": 0.25, "technical": 0.15, "company_quality": 0.10},
+    "skills":   {"technical": 0.45, "role_fit": 0.35, "intent": 0.10, "company_quality": 0.10},
+}
+_EMPHASIS_ALIASES = {
+    "balanced": "balanced", "balance": "balanced",
+    "most likely to move": "intent", "most_likely_to_move": "intent", "intent": "intent",
+    "move": "intent", "likely": "intent",
+    "best skills match": "skills", "best_skills_match": "skills", "skills": "skills",
+    "skills match": "skills", "best skills": "skills",
+}
+
+
+def normalize_emphasis(s: str) -> str:
+    return _EMPHASIS_ALIASES.get((s or "").strip().lower(), "balanced")
+
+
+def recruit_fit_score(c: dict, emphasis: str = "balanced") -> int:
+    """Composite recruit-fit from the stored scores (freshness dropped)."""
+    w = RECRUIT_EMPHASIS.get(emphasis, RECRUIT_EMPHASIS["balanced"])
+    v = (w.get("role_fit", 0) * (c.get("role_fit_score") or 0)
+         + w.get("intent", 0) * (c.get("job_change_intent_score") or 0)
+         + w.get("technical", 0) * (c.get("technical_score") or 0)
+         + w.get("company_quality", 0) * (c.get("company_quality_score") or 0))
+    return clamp(v)
+
+
+def build_recruit_shortlist(per_category: int, emphasis: str = "balanced",
+                            country: Optional[str] = None) -> dict:
+    """For each of the 12 categories, pull a generous overall-ordered pool (index-friendly),
+    re-rank by the recruit-fit composite in Python, and take the top N. Stateless & FREE."""
+    per_category = max(1, min(50, int(per_category or 1)))
+    emphasis = normalize_emphasis(emphasis)
+    country = (country or "").strip() or None
+    pool_size = min(300, max(40, per_category * 5))
+    groups, total = [], 0
+    for cat in CATEGORY_LABELS:
+        try:
+            pool = db.CandidateRepo.recruit_pool(cat, country, pool_size)
+        except Exception as e:
+            log.warning("recruit_pool failed for %s: %s", cat, e)
+            pool = []
+        for c in pool:
+            c["recruit_fit"] = recruit_fit_score(c, emphasis)
+        pool.sort(key=lambda x: (x.get("recruit_fit") or 0, x.get("overall_candidate_score") or 0),
+                  reverse=True)
+        top = pool[:per_category]
+        groups.append({"category": cat, "count": len(top), "candidates": top})
+        total += len(top)
+    return {"emphasis": emphasis, "per_category": per_category, "region": country,
+            "total": total, "groups": groups}
+
+
+# ── LinkedIn outreach sequence (3 phased messages, grounded, deterministic fallback) ──
+_PHASE_SPEC = {
+    1: ("connection-request opener, MAX 300 characters, with a SPECIFIC hook tied to their real "
+        "role or company"),
+    2: ("the value message: why you're reaching out, the kind of role you have in mind, and what's "
+        "in it for them"),
+    3: ("a soft, graceful nudge with a clear, low-pressure call to action"),
+}
+
+
+def _first_name(name: str) -> str:
+    return (name or "").strip().split(" ")[0] if name else "there"
+
+
+def _recruit_facts(cand: dict, company: Optional[dict]) -> dict:
+    """Grounding facts for outreach — reuses the candidate-brief facts (which already prefer the
+    richer CoreSignal summary/expertise) and adds the cached AI brief."""
+    f = _candidate_facts(cand, company)
+    f["first_name"] = _first_name(cand.get("full_name"))
+    f["ai_brief"] = cand.get("ai_paragraph")
+    return f
+
+
+def _truncate_chars(s: str, n: int) -> str:
+    s = (s or "").strip()
+    if len(s) <= n:
+        return s
+    cut = s[:n]
+    sp = cut.rsplit(" ", 1)[0]
+    return (sp if len(sp) >= n * 0.6 else cut).rstrip(" ,;:-")
+
+
+def _deterministic_sequence(f: dict) -> list:
+    """Always-available 3-message sequence composed strictly from the provided facts."""
+    fn = f.get("first_name") or "there"
+    title = f.get("title") or f.get("role_family") or "your work"
+    company = f.get("current_company")
+    exp = f.get("expertise") or []
+    focus = exp[0] if exp else (f.get("category") or "your field")
+    role_area = f.get("category") or f.get("role_family") or "growth"
+    sen = (f.get("seniority") or "").replace("_", " ").strip()
+
+    hook = f"your work as {title}" if title else "your background"
+    if company:
+        hook += f" at {company}"
+    m1 = _truncate_chars(
+        f"Hi {fn}, {hook} stood out to me" + (f" — especially around {focus}" if focus else "")
+        + ". I'm connecting with strong people in this space and would love to add you.", 300)
+
+    m2 = (f"Thanks for connecting, {fn}. I work with teams hiring in {role_area}, and given your "
+          + (f"{sen} " if sen and sen != "unknown" else "")
+          + (f"experience with {focus}" if focus else "experience")
+          + ", I thought there could be a genuine fit. Happy to share the specifics — scope, the "
+          "team, and how the comp and flexibility compare to where you are now.")
+
+    m3 = (f"No pressure at all, {fn} — even if the timing isn't right, I'd value staying in touch. "
+          "Would you be open to a quick 15-minute call this week to compare notes?")
+
+    return [{"phase": 1, "body": m1, "source": "derived"},
+            {"phase": 2, "body": m2, "source": "derived"},
+            {"phase": 3, "body": m3, "source": "derived"}]
+
+
+_RECRUIT_SYS = (
+    "You are an expert technical recruiter writing a 3-step LinkedIn outreach sequence to a passive "
+    "candidate. Use ONLY the provided facts — NEVER invent experience, employers, skills, numbers or "
+    "titles, and NEVER mention or infer age, gender, race, ethnicity, nationality, religion, "
+    "disability, marital/family status or any protected characteristic. The three messages must be "
+    "DISTINCT and phased so the person feels genuinely and specifically approached, not spammed, and "
+    "must name real details from their profile. "
+    "m1 = " + _PHASE_SPEC[1] + ". m2 = " + _PHASE_SPEC[2] + ". m3 = " + _PHASE_SPEC[3] + ". "
+    "Warm, human, concise, and specific. Keep m1 at or under 300 characters. "
+    'Return STRICT JSON {"m1":"...","m2":"...","m3":"..."}.')
+
+
+def generate_recruit_sequence(cand: dict, company: Optional[dict] = None) -> dict:
+    """Personalised 3-message LinkedIn sequence, grounded strictly in the candidate's stored facts
+    (preferring CoreSignal LinkedIn data when present). gpt-4o-mini with a deterministic fallback.
+    Returns {messages:[{phase,body,source}], source}."""
+    f = _recruit_facts(cand, company)
+    if not openai_available():
+        msgs = _deterministic_sequence(f)
+        return {"messages": msgs, "source": "derived"}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0.5, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": _RECRUIT_SYS},
+                      {"role": "user", "content": json.dumps(f, default=str)}], timeout=35)
+        out = json.loads(resp.choices[0].message.content)
+        bodies = [out.get("m1"), out.get("m2"), out.get("m3")]
+        if all((b or "").strip() for b in bodies):
+            msgs = [{"phase": 1, "body": _truncate_chars(bodies[0], 300), "source": "ai"},
+                    {"phase": 2, "body": (bodies[1] or "").strip()[:1500], "source": "ai"},
+                    {"phase": 3, "body": (bodies[2] or "").strip()[:1500], "source": "ai"}]
+            return {"messages": msgs, "source": "ai"}
+    except Exception as e:
+        log.warning("recruit sequence failed (%s) — using deterministic", e)
+    return {"messages": _deterministic_sequence(f), "source": "derived"}
+
+
+def regenerate_recruit_message(cand: dict, company: Optional[dict], phase: int) -> dict:
+    """Regenerate ONE message (phase 1/2/3), grounded, with a deterministic fallback.
+    Returns {phase, body, source}."""
+    phase = int(phase)
+    if phase not in (1, 2, 3):
+        phase = 1
+    f = _recruit_facts(cand, company)
+    det = {m["phase"]: m for m in _deterministic_sequence(f)}[phase]
+    if not openai_available():
+        return {"phase": phase, "body": det["body"], "source": "derived"}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_env("OPENAI_API_KEY"))
+        sysmsg = (
+            "You are an expert technical recruiter. Write ONE LinkedIn outreach message — " + _PHASE_SPEC[phase]
+            + ". Use ONLY the provided facts; NEVER invent experience, employers, skills, numbers or "
+            "titles; NEVER mention or infer any protected characteristic. Name real details from the "
+            "profile. Warm, human, specific."
+            + (" Keep it at or under 300 characters." if phase == 1 else "")
+            + ' Return STRICT JSON {"message":"..."}.')
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0.7, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": sysmsg},
+                      {"role": "user", "content": json.dumps(f, default=str)}], timeout=30)
+        body = (json.loads(resp.choices[0].message.content).get("message") or "").strip()
+        if body:
+            if phase == 1:
+                body = _truncate_chars(body, 300)
+            return {"phase": phase, "body": body[:1500], "source": "ai"}
+    except Exception as e:
+        log.warning("recruit message regen failed (%s) — using deterministic", e)
+    return {"phase": phase, "body": det["body"], "source": "derived"}
 
 
 def _apply_ai_nudge(scores: dict, ai_meta: dict) -> dict:
